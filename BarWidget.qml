@@ -6,10 +6,10 @@ import "Model.js" as Model
 
 BarWidget {
   id: root
-  moduleName: "io.github.olivoil.omanado"
+  moduleName: "io.github.olivoil.hurricane-tracker"
 
   readonly property var tracker: bar && bar.shell
-    ? bar.shell.serviceFor("io.github.olivoil.omanado") : null
+    ? bar.shell.serviceFor("io.github.olivoil.hurricane-tracker") : null
   readonly property int activeCount: tracker ? tracker.activeCount : 0
   readonly property int trackingCount: tracker ? tracker.trackingCount : 0
   readonly property var strongestStorm: activeCount > 0 ? tracker.storms[0] : null
@@ -82,7 +82,7 @@ BarWidget {
       } else if (mouseButton === Qt.RightButton) {
         Quickshell.execDetached(["omarchy-launch-browser", "https://www.nhc.noaa.gov/"])
       } else {
-        root.bar.run("omarchy-shell shell toggle io.github.olivoil.omanado")
+        root.bar.run("omarchy-shell shell toggle io.github.olivoil.hurricane-tracker")
       }
     }
   }

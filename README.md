@@ -1,147 +1,141 @@
 # Hurricane Tracker
 
-Hurricane Tracker is a native Omarchy weather plugin. Its compact bar signal
-opens a calm, spatial view of active National Hurricane Center cyclones, their
-past and forecast center tracks, official cone of uncertainty, and regional
-development outlooks.
+Hurricane Tracker adds a tropical-weather icon to your Omarchy bar. Open it to
+see what the National Hurricane Center (NHC) is tracking: active storms,
+forecast paths, uncertainty cones, and areas that may develop.
 
-The project keeps its original `io.github.olivoil.omanado` plugin ID and cache
-path so existing installations continue to update normally.
+![Hurricane Tracker showing Tropical Storm Karina's forecast cone, nearby systems, and NHC forecast discussion](preview.png)
 
-The interaction rhythm is inspired by Windy's hurricane view, but the plugin
-uses its own native QML interface, public-domain map geometry, and official
-NOAA/NHC data. It does not use Windy assets or APIs.
+The plugin covers the Atlantic, Eastern Pacific, and Central Pacific basins. It
+does not currently include storms tracked by the JTWC or other agencies.
 
-![Hurricane Tracker showing Tropical Storm Karina's forecast cone, regional systems, and NHC discussion](preview.png)
+## Features
 
-## What it does
+- Active storms and developing systems, grouped by basin
+- Official forecast tracks and cones of uncertainty
+- Past tracks and intensity history
+- Two-day and seven-day formation chances for NHC outlook areas
+- Forecast intensity shown with both labels and color
+- Excerpts from the latest NHC discussions, with links to the full advisories
+- Optional notifications for new cyclones and rising formation chances
+- Keyboard navigation, map controls, and support for reduced motion
+- Cached data when the NHC is temporarily unavailable
 
-- Shows active NHC cyclones and developing or remnant outlook areas
-- Groups every system under Atlantic, Eastern Pacific, or Central Pacific
-- Draws the official forecast center track and cone of uncertainty
-- Shows the preliminary past track and intensity history
-- Encodes current and forecast intensity with labels as well as color
-- Captures a readable excerpt from the latest forecast discussion or tropical
-  weather outlook, with a link to the complete official product
-- Uses one rotatable globe at every scale; close views become locally flat
-  without switching projections
-- Can notify when formation odds cross a chosen threshold in a chosen region,
-  or when NHC starts advisories for a new cyclone there
-- Supports pan, zoom, system selection, keyboard navigation, and reduced visual noise
-- Refreshes in one shared shell service, even on multi-monitor setups
-- Falls back to a clearly marked cached advisory when NHC is unavailable
-- Requires no API key and adds no background daemon
-
-Hurricane Tracker currently covers the Atlantic, Eastern Pacific, and Central
-Pacific basins represented by the NHC feed. It is not yet a global JTWC tracker.
+The map is rendered locally in QML using bundled Natural Earth geometry. The
+plugin does not need an API key or extra Python packages, and it does not
+install a background daemon.
 
 ## Install
+
+Hurricane Tracker requires Omarchy Quattro with Quickshell plugin support and
+Python 3.
 
 ```bash
 omarchy plugin add https://github.com/olivoil/omarchy-hurricane-tracker.git --enable
 ```
 
-The refresh interval and regional alerts can be changed in Omarchy's bar
-settings. Polling defaults to 15 minutes. Alerts default to off; when enabled,
-Hurricane Tracker quietly records the current systems as its baseline and only
-announces a later threshold crossing or newly advised cyclone.
+It also needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` to download
+advisories and outlooks.
 
-Formation thresholds follow the NHC seven-day outlook bands exposed by the
-plugin: 20%, 40%, or 70%. The alert region can be Atlantic, Eastern Pacific,
-Central Pacific, or all NHC basins.
+## Settings and notifications
 
-## Runtime requirements
+Hurricane Tracker checks for new NHC data every 15 minutes by default. You can
+change the interval in Omarchy's bar settings.
 
-- Omarchy Quattro with its standard Quickshell plugin support
-- Python 3; the bundled helper uses only the Python standard library
-- HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov`
+Notifications are off until you choose a region. You can be notified when:
 
-No API key, third-party Python package, privileged command, system service, or
-manual setup is required.
+- an outlook area's seven-day formation chance reaches 20%, 40%, or 70%; or
+- the NHC begins issuing advisories for a new cyclone.
+
+Alerts can cover the Atlantic, Eastern Pacific, Central Pacific, or all three.
+When you turn them on, existing systems are treated as the starting point, so
+you will not get a burst of notifications for storms already underway.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| Left click the bar signal | Open or close Hurricane Tracker |
-| Middle click the bar signal | Refresh NHC data |
-| Right click the bar signal | Open the NHC website |
-| Click a system or map marker | Select and fit that system |
-| Click a region heading | Expand or collapse it; opening also fits the region |
-| Click **View all** | Refit the map to every system in the expanded basin |
-| Drag the map | Rotate the globe, which feels like panning at close scale |
+| Left-click the bar icon | Open or close Hurricane Tracker |
+| Middle-click the bar icon | Refresh NHC data |
+| Right-click the bar icon | Open the NHC website |
+| Click a system or map marker | Select it and fit it on the map |
+| Click a basin heading | Expand or collapse it; expanding also fits it on the map |
+| Click **View all** | Fit every system in the expanded basin on the map |
+| Drag the map | Move around the globe |
 | Mouse wheel | Zoom at the pointer |
-| Up / Down | Select the previous or next cyclone or outlook area |
+| Up / Down | Select the previous or next system |
 | `+` / `-` | Zoom in or out |
 | `F` | Fit the selected system |
 | `G` or `0` | Show the whole globe |
 | `R` | Refresh |
-| `O` | Open the selected storm's official advisory |
-| Escape | Close |
+| `O` | Open the selected system's official advisory |
+| Escape | Close Hurricane Tracker |
 
-## Data, cache, and safety
+## Data and safety
 
-Storm status comes from
-[`CurrentStorms.json`](https://www.nhc.noaa.gov/CurrentStorms.json). Forecast
-tracks, cones, and preliminary best tracks come from the KMZ links in that
-official feed. Formation areas, probabilities, remnant systems such as Dolly,
-and their narratives come from NHC's Graphical Tropical Weather Outlook KMZ
-products. Forecast-discussion excerpts come from the linked NHC text product.
-Hurricane Tracker only permits HTTPS requests to NHC-owned hostnames and bounds
-every response and expanded archive before parsing it.
+Active storm data comes from the NHC's
+[`CurrentStorms.json`](https://www.nhc.noaa.gov/CurrentStorms.json) feed. The
+plugin follows the KMZ links in that feed for forecast tracks, cones, and
+preliminary best tracks. Formation areas and probabilities come from the NHC's
+Graphical Tropical Weather Outlook products. It also fetches the linked text
+products for forecast discussion excerpts.
 
-The last normalized response is stored at
-`$XDG_CACHE_HOME/omanado/storms.json`, or `~/.cache/omanado/storms.json` when
-`XDG_CACHE_HOME` is unset. The cache contains public weather data only and is
-written with user-only permissions.
+Network requests are limited to NHC-owned HTTPS hosts, and downloads and
+expanded archives are size-limited before parsing.
 
-Hurricane Tracker is an awareness tool, not an emergency warning system. The
-forecast cone describes the probable path of the storm center. Hazardous wind, rain,
-surge, and tornadoes can occur well outside it. Follow local emergency
-management and official weather guidance.
+The latest data is cached at `~/.cache/omanado/storms.json`. If you have set
+`$XDG_CACHE_HOME`, the cache is stored in `$XDG_CACHE_HOME/omanado/storms.json`
+instead. It contains public weather data only.
+
+> Hurricane Tracker is an awareness tool, not an emergency warning system. The
+> forecast cone shows the probable path of the storm's center; dangerous wind,
+> rain, storm surge, and tornadoes can occur well outside it. Follow guidance
+> from local authorities and official weather services.
 
 ## Update
 
 ```bash
-omarchy plugin update io.github.olivoil.omanado
+omarchy plugin update io.github.olivoil.hurricane-tracker
 omarchy restart shell
 ```
 
-The restart ensures the updated QML interface and bundled data helper load
-together. Alert settings and the cached public NHC response are preserved.
+Restarting the shell makes sure the QML interface and data helper are updated
+together. Your alert settings and cached NHC data are preserved.
 
 ## Uninstall
 
 ```bash
-omarchy plugin remove io.github.olivoil.omanado
+omarchy plugin remove io.github.olivoil.hurricane-tracker
 ```
 
-This removes the plugin while leaving its public weather cache in
-`~/.cache/omanado/`. Delete that directory separately if you also want to
-discard the cached response.
+Omarchy leaves the cached weather data behind. If you want to remove it as
+well, delete `~/.cache/omanado/storms.json`, or the equivalent file under your
+custom `$XDG_CACHE_HOME`.
 
 ## Development
 
-Run the complete local check:
+Run the full test suite with:
 
 ```bash
 ./tests/run
 ```
 
-For live development, link the checkout into the user plugin directory:
+For live development, link the checkout into your Omarchy plugin directory:
 
 ```bash
-ln -s "$PWD" ~/.config/omarchy/plugins/io.github.olivoil.omanado
+ln -s "$PWD" ~/.config/omarchy/plugins/io.github.olivoil.hurricane-tracker
 omarchy-shell shell rescanPlugins
-omarchy plugin enable io.github.olivoil.omanado center
-omarchy-shell shell summon io.github.olivoil.omanado '{}'
+omarchy plugin enable io.github.olivoil.hurricane-tracker center
+omarchy-shell shell summon io.github.olivoil.hurricane-tracker '{}'
 ```
 
-The shell watches the linked directory and reloads saved QML automatically.
-See [`docs/architecture.md`](docs/architecture.md) for the data and UI split.
+The shell watches the linked directory and reloads saved QML files
+automatically. See [`docs/architecture.md`](docs/architecture.md) for an
+overview of the data pipeline and UI.
 
 ## License
 
-Hurricane Tracker is available under the MIT License. The bundled Natural Earth
-geometry is public domain; see [`assets/NATURAL_EARTH.md`](assets/NATURAL_EARTH.md) and
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Hurricane Tracker is licensed under the MIT License. The bundled Natural Earth
+geometry is public domain; see
+[`assets/NATURAL_EARTH.md`](assets/NATURAL_EARTH.md) and
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for details.

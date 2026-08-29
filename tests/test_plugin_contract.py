@@ -12,7 +12,7 @@ class PluginContractTests(unittest.TestCase):
     def test_manifest_entry_points_exist_and_stay_inside_repo(self):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["schemaVersion"], 1)
-        self.assertEqual(manifest["id"], "io.github.olivoil.omanado")
+        self.assertEqual(manifest["id"], "io.github.olivoil.hurricane-tracker")
         self.assertEqual(manifest["name"], "Hurricane Tracker")
         self.assertEqual(manifest["barWidget"]["displayName"], "Hurricane Tracker")
         self.assertEqual(manifest["version"], "0.0.1")

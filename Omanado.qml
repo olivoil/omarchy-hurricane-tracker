@@ -18,7 +18,7 @@ Item {
   property bool regionDisclosureInitialized: false
   property int clockTick: 0
 
-  readonly property var tracker: shell ? shell.serviceFor("io.github.olivoil.omanado") : null
+  readonly property var tracker: shell ? shell.serviceFor("io.github.olivoil.hurricane-tracker") : null
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
   readonly property var outlooks: tracker && Array.isArray(tracker.outlooks) ? tracker.outlooks : []
   readonly property var systems: Model.orderedSystems(storms, outlooks)
@@ -122,7 +122,7 @@ Item {
   function dismiss() {
     close()
     if (shell && typeof shell.hide === "function")
-      shell.hide((manifest && manifest.id) || "io.github.olivoil.omanado")
+      shell.hide((manifest && manifest.id) || "io.github.olivoil.hurricane-tracker")
   }
 
   function syncSelection(forceReveal) {
