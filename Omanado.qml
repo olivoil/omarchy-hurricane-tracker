@@ -14,13 +14,15 @@ Item {
   property var manifest: null
   property bool opened: false
   property string selectedKey: ""
+  property string expandedRegion: ""
+  property bool regionDisclosureInitialized: false
   property int clockTick: 0
 
   readonly property var tracker: shell ? shell.serviceFor("io.github.olivoil.omanado") : null
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
   readonly property var outlooks: tracker && Array.isArray(tracker.outlooks) ? tracker.outlooks : []
   readonly property var systems: Model.orderedSystems(storms, outlooks)
-  readonly property var regionalRows: Model.regionalRows(storms, outlooks)
+  readonly property var regionalRows: Model.disclosedRegionalRows(storms, outlooks, expandedRegion)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property var selectedStorm: selectedSystem && selectedSystem.kind === "storm" ? selectedSystem : null
   readonly property var selectedOutlook: selectedSystem && selectedSystem.kind === "outlook" ? selectedSystem : null
@@ -67,13 +69,37 @@ Item {
     return system ? Model.systemClassificationLabel(system).toUpperCase() : ""
   }
 
+  function summaryFacts(system) {
+    if (!system) return []
+    if (system.kind === "outlook") return [
+      { value: String(system.twoDayChance || 0) + "% in 2 days" },
+      { value: String(system.sevenDayChance || 0) + "% in 7 days" },
+      { value: String(system.basinLabel || "") }
+    ]
+    return [
+      { value: Model.formatWind(system) + " wind" },
+      { value: Model.formatPressure(system) },
+      { value: Model.formatMovement(system) }
+    ]
+  }
+
+  function regionalRowsHeight(rows) {
+    var data = Array.isArray(rows) ? rows : []
+    var total = 0
+    for (var i = 0; i < data.length; i++) {
+      total += data[i].kind === "region" ? Style.space(44)
+        : (data[i].kind === "empty" ? Style.space(28) : Style.space(68))
+    }
+    return total
+  }
+
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
     if (payload.stormId) selectedKey = "storm:" + String(payload.stormId)
     if (payload.outlookId) selectedKey = "outlook:" + String(payload.outlookId)
     opened = true
-    syncSelection()
+    syncSelection(true)
     if (tracker && !tracker.hasLoaded && !tracker.loading) tracker.refresh()
     Qt.callLater(function() {
       keyCatcher.forceActiveFocus()
@@ -96,10 +122,16 @@ Item {
       shell.hide((manifest && manifest.id) || "io.github.olivoil.omanado")
   }
 
-  function syncSelection() {
+  function syncSelection(forceReveal) {
+    var previousKey = selectedKey
     selectedKey = Model.selectedKeyAfterRefresh(systems, selectedKey)
-    var rowIndex = rowIndexForKey(selectedKey)
+    var selected = Model.systemByKey(systems, selectedKey)
+    if (selected && (forceReveal || selected.key !== previousKey || !regionDisclosureInitialized)) {
+      expandedRegion = String(selected.basin || "")
+      regionDisclosureInitialized = true
+    }
     Qt.callLater(function() {
+      var rowIndex = root.rowIndexForKey(root.selectedKey)
       var sectionIndex = regionRowForIndex(rowIndex)
       if (sectionIndex >= 0) systemList.positionViewAtIndex(sectionIndex, ListView.Beginning)
     })
@@ -119,11 +151,35 @@ Item {
     return -1
   }
 
+  function regionIndexForBasin(basin) {
+    for (var i = 0; i < regionalRows.length; i++) {
+      if (regionalRows[i].kind === "region" && regionalRows[i].basin === basin) return i
+    }
+    return -1
+  }
+
+  function toggleRegion(basin) {
+    var opening = expandedRegion !== basin
+    expandedRegion = opening ? basin : ""
+    regionDisclosureInitialized = true
+    if (opening) stormMap.fitRegion(basin)
+    Qt.callLater(function() {
+      var index = root.regionIndexForBasin(basin)
+      if (index >= 0) systemList.positionViewAtIndex(index, ListView.Contain)
+    })
+    keyCatcher.forceActiveFocus()
+  }
+
   function selectSystem(key) {
-    if (!Model.systemByKey(systems, key)) return
+    var system = Model.systemByKey(systems, key)
+    if (!system) return
     selectedKey = key
-    var rowIndex = rowIndexForKey(key)
-    if (rowIndex >= 0) systemList.positionViewAtIndex(rowIndex, ListView.Contain)
+    expandedRegion = String(system.basin || "")
+    regionDisclosureInitialized = true
+    Qt.callLater(function() {
+      var rowIndex = root.rowIndexForKey(key)
+      if (rowIndex >= 0) systemList.positionViewAtIndex(rowIndex, ListView.Contain)
+    })
     keyCatcher.forceActiveFocus()
   }
 
@@ -158,8 +214,8 @@ Item {
 
   Connections {
     target: root.tracker
-    function onStormsChanged() { root.syncSelection() }
-    function onOutlooksChanged() { root.syncSelection() }
+    function onStormsChanged() { root.syncSelection(false) }
+    function onOutlooksChanged() { root.syncSelection(false) }
   }
 
   Connections {
@@ -408,8 +464,8 @@ Item {
           anchors.leftMargin: Style.spacing.lg
           anchors.top: parent.top
           anchors.topMargin: Style.spacing.lg
-          width: Math.min(Style.space(500), mapArea.width - Style.spacing.lg * 2)
-          height: Style.space(124)
+          width: Math.min(Style.space(420), mapArea.width - Style.spacing.lg * 2)
+          height: Style.space(78)
           radius: 9
           color: root.background
           border.width: 1
@@ -422,17 +478,21 @@ Item {
             anchors.leftMargin: Style.spacing.lg
             anchors.top: parent.top
             anchors.topMargin: Style.spacing.md
+            anchors.right: intensityBadge.left
+            anchors.rightMargin: Style.spacing.sm
             text: root.selectedSystem ? String(root.selectedSystem.name || root.selectedSystem.title || "Tropical system") : ""
             textFormat: Text.PlainText
             color: root.foreground
+            elide: Text.ElideRight
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.heading
             font.bold: true
           }
 
           Rectangle {
-            anchors.left: stormName.right
-            anchors.leftMargin: Style.spacing.sm
+            id: intensityBadge
+            anchors.right: summaryAge.left
+            anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: stormName.verticalCenter
             width: intensityText.implicitWidth + 14
             height: intensityText.implicitHeight + 6
@@ -458,14 +518,14 @@ Item {
           }
 
           Text {
+            id: summaryAge
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
-            anchors.top: parent.top
-            anchors.topMargin: Style.spacing.lg
+            anchors.verticalCenter: stormName.verticalCenter
             text: {
               root.clockTick
               if (!root.selectedSystem) return ""
-              if (root.selectedOutlook) return "NHC OUTLOOK · " + Model.humanAge(root.selectedOutlook.updatedAt)
+              if (root.selectedOutlook) return Model.humanAge(root.selectedOutlook.updatedAt)
               if (!root.selectedStorm) return ""
               var label = Model.advisoryLabel(root.selectedStorm)
               return Array.isArray(root.selectedStorm.dataWarnings) && root.selectedStorm.dataWarnings.length > 0
@@ -479,70 +539,37 @@ Item {
           }
 
           Row {
+            id: summaryFactsRow
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
-            anchors.right: parent.right
-            anchors.rightMargin: Style.spacing.lg
             anchors.bottom: parent.bottom
             anchors.bottomMargin: Style.spacing.md
-            height: Style.space(47)
-            spacing: Style.spacing.xl
+            spacing: Style.spacing.md
 
-            Column {
-              width: Math.max(90, (parent.width - parent.spacing * 2) / 3)
-              spacing: 2
-              Text {
-                text: root.selectedOutlook ? "2-DAY CHANCE" : "MAX WIND"
-                color: root.dim
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-              Text {
-                text: root.selectedOutlook ? String(root.selectedOutlook.twoDayChance || 0) + "%"
-                  : Model.formatWind(root.selectedStorm)
-                color: root.foreground
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
-            }
-            Column {
-              width: Math.max(90, (parent.width - parent.spacing * 2) / 3)
-              spacing: 2
-              Text {
-                text: root.selectedOutlook ? "7-DAY CHANCE" : "PRESSURE"
-                color: root.dim
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-              Text {
-                text: root.selectedOutlook ? String(root.selectedOutlook.sevenDayChance || 0) + "%"
-                  : Model.formatPressure(root.selectedStorm)
-                color: root.foreground
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
-            }
-            Column {
-              width: Math.max(110, (parent.width - parent.spacing * 2) / 3)
-              spacing: 2
-              Text {
-                text: root.selectedOutlook ? "REGION" : "MOVEMENT"
-                color: root.dim
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-              Text {
-                text: root.selectedOutlook ? String(root.selectedOutlook.basinLabel || "")
-                  : Model.formatMovement(root.selectedStorm)
-                color: root.foreground
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
+            Repeater {
+              model: root.summaryFacts(root.selectedSystem)
+
+              Row {
+                required property int index
+                required property var modelData
+                spacing: Style.spacing.md
+
+                Text {
+                  visible: index > 0
+                  text: "·"
+                  textFormat: Text.PlainText
+                  color: root.dim
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  text: String(modelData.value || "")
+                  textFormat: Text.PlainText
+                  color: root.foreground
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                }
               }
             }
           }
@@ -888,13 +915,13 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
-          height: Style.space(64)
+          height: Style.space(48)
 
           Text {
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
-            text: "NHC REGIONS"
+            text: "SYSTEMS"
             color: root.foreground
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.bodySmall
@@ -905,11 +932,10 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
-            text: String(root.systems.length)
+            text: String(root.systems.length) + " tracked"
             color: root.dim
             font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.body
-            font.bold: true
+            font.pixelSize: Style.font.caption
           }
           Rectangle {
             anchors.left: parent.left
@@ -925,21 +951,29 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: listHeader.bottom
-          anchors.bottom: discussionPanel.top
+          height: Math.min(root.regionalRowsHeight(root.regionalRows),
+            root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
+              ? sidebar.height * 0.48
+              : sidebar.height - listHeader.height - sourceFooter.height)
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           model: root.regionalRows
           currentIndex: -1
 
           delegate: Rectangle {
+            id: systemRow
             property var rowData: modelData
             property var system: rowData.kind === "system" ? rowData.system : null
             property bool isSelected: system && system.key === root.selectedKey
+            property bool regionExpanded: rowData.kind === "region" && rowData.basin === root.expandedRegion
             readonly property color itemColor: system ? root.systemColor(system) : root.dim
             width: systemList.width
-            height: rowData.kind === "region" ? Style.space(54)
-              : (rowData.kind === "empty" ? Style.space(34) : Style.space(86))
-            color: isSelected ? Style.selectedFillFor(root.foreground, root.accent) : "transparent"
+            height: rowData.kind === "region" ? Style.space(44)
+              : (rowData.kind === "empty" ? Style.space(28) : Style.space(68))
+            color: isSelected ? Style.selectedFillFor(root.foreground, root.accent)
+              : (rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+
+            Behavior on color { ColorAnimation { duration: 120 } }
 
             Rectangle {
               anchors.left: parent.left
@@ -985,8 +1019,8 @@ Item {
               anchors.right: parent.right
               anchors.rightMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
-              text: "\uf05b"
-              color: root.dim
+              text: systemRow.regionExpanded ? "\uf078" : "\uf054"
+              color: systemRow.regionExpanded ? root.foreground : root.dim
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
             }
@@ -994,7 +1028,7 @@ Item {
             Text {
               visible: rowData.kind === "empty"
               anchors.left: parent.left
-              anchors.leftMargin: Style.spacing.xl
+              anchors.leftMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
               text: "No current systems"
               color: root.dim
@@ -1008,7 +1042,7 @@ Item {
               anchors.left: parent.left
               anchors.leftMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(38)
+              width: Style.space(34)
               height: width
               radius: system && system.kind === "storm" ? width / 2 : 8
               color: Qt.rgba(Qt.color(itemColor).r, Qt.color(itemColor).g,
@@ -1031,8 +1065,8 @@ Item {
               visible: system !== null
               anchors.left: severityBadge.right
               anchors.leftMargin: Style.spacing.md
-              anchors.right: chevron.left
-              anchors.rightMargin: Style.spacing.sm
+              anchors.right: parent.right
+              anchors.rightMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
               spacing: 3
 
@@ -1043,22 +1077,12 @@ Item {
                 color: root.foreground
                 elide: Text.ElideRight
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.body + 1
+                font.pixelSize: Style.font.subtitle
                 font.bold: true
               }
               Text {
                 width: parent.width
-                text: system ? Model.systemClassificationLabel(system) : ""
-                textFormat: Text.PlainText
-                color: itemColor
-                elide: Text.ElideRight
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.bodySmall
-                font.bold: true
-              }
-              Text {
-                width: parent.width
-                text: system ? Model.systemMetric(system) : ""
+                text: system ? Model.systemClassificationLabel(system) + " · " + Model.systemMetric(system) : ""
                 textFormat: Text.PlainText
                 color: root.dim
                 elide: Text.ElideRight
@@ -1067,32 +1091,22 @@ Item {
               }
             }
 
-            Text {
-              id: chevron
-              visible: system !== null
-              anchors.right: parent.right
-              anchors.rightMargin: Style.spacing.lg
-              anchors.verticalCenter: parent.verticalCenter
-              text: "\uf054"
-              color: isSelected ? root.foreground : root.dim
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-
             MouseArea {
+              id: rowMouse
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
               onClicked: {
-                if (rowData.kind === "region") stormMap.fitRegion(rowData.basin)
+                if (rowData.kind === "region") root.toggleRegion(rowData.basin)
                 else if (system) root.selectSystem(system.key)
               }
             }
 
-            Accessible.name: rowData.kind === "region" ? String(rowData.name || "Region") + " region"
+            Accessible.name: rowData.kind === "region" ? String(rowData.name || "Region") + " region, "
+              + (regionExpanded ? "expanded" : "collapsed")
               : (system ? String(system.name || "Tropical system") + ", "
                 + Model.systemClassificationLabel(system) + ", " + Model.systemMetric(system) : "No current systems")
-            Accessible.role: Accessible.ListItem
+            Accessible.role: rowData.kind === "region" ? Accessible.Button : Accessible.ListItem
           }
 
           QQC.ScrollBar.vertical: QQC.ScrollBar {
@@ -1105,10 +1119,9 @@ Item {
           id: discussionPanel
           anchors.left: parent.left
           anchors.right: parent.right
+          anchors.top: systemList.bottom
           anchors.bottom: sourceFooter.top
-          height: root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
-            ? Style.space(214) : 0
-          visible: height > 0
+          visible: root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
           clip: true
 
           Rectangle {
@@ -1137,16 +1150,20 @@ Item {
           }
 
           Text {
+            id: discussionText
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
             anchors.top: discussionLabel.bottom
             anchors.topMargin: Style.spacing.sm
+            anchors.bottom: discussionActions.top
+            anchors.bottomMargin: Style.spacing.sm
             text: root.selectedSystem ? Model.discussionExcerpt(root.selectedSystem) : ""
             textFormat: Text.PlainText
             wrapMode: Text.WordWrap
-            maximumLineCount: 6
+            maximumLineCount: Math.max(4,
+              Math.floor(height / Math.max(1, Style.font.bodySmall * 1.2)))
             elide: Text.ElideRight
             color: root.foreground
             font.family: Style.font.menuFamily
@@ -1155,6 +1172,7 @@ Item {
           }
 
           Row {
+            id: discussionActions
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
             anchors.bottom: parent.bottom
@@ -1190,7 +1208,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          height: Style.space(132)
+          height: Style.space(68)
 
           Rectangle {
             anchors.left: parent.left
@@ -1201,31 +1219,15 @@ Item {
           }
 
           Text {
-            id: sourceLabel
+            id: alertStatusLabel
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
             anchors.top: parent.top
             anchors.topMargin: Style.spacing.md
-            text: "SOURCE · NOAA NATIONAL HURRICANE CENTER"
+            text: "Notifications: " + (root.tracker ? root.tracker.alertStatus : "Off")
             textFormat: Text.PlainText
-            color: root.dim
-            elide: Text.ElideRight
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 0.3
-          }
-
-          Text {
-            anchors.left: parent.left
-            anchors.leftMargin: Style.spacing.lg
-            anchors.right: parent.right
-            anchors.rightMargin: Style.spacing.lg
-            anchors.top: sourceLabel.bottom
-            anchors.topMargin: Style.spacing.sm
-            text: "ALERTS · " + (root.tracker ? root.tracker.alertStatus : "Off")
             color: root.tracker && root.tracker.alertsEnabled ? root.accent : root.dim
             elide: Text.ElideRight
             font.family: Style.font.menuFamily
@@ -1238,15 +1240,14 @@ Item {
             anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.spacing.md
-            wrapMode: Text.WordWrap
-            text: "For awareness only. Guidance can change quickly, and hazards can extend beyond tracks, cones, or formation areas. Follow local emergency guidance."
+            anchors.top: alertStatusLabel.bottom
+            anchors.topMargin: Style.spacing.sm
+            text: "Awareness only. Follow local emergency alerts."
             textFormat: Text.PlainText
             color: root.dim
+            elide: Text.ElideRight
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.caption
-            lineHeight: 1.18
           }
         }
       }

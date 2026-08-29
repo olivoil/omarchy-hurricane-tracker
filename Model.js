@@ -191,6 +191,16 @@ function regionalRows(storms, outlooks) {
   return rows
 }
 
+function disclosedRegionalRows(storms, outlooks, expandedBasin) {
+  var rows = regionalRows(storms, outlooks)
+  var basin = String(expandedBasin || "")
+  var visible = []
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].kind === "region" || rows[i].basin === basin) visible.push(rows[i])
+  }
+  return visible
+}
+
 function systemByKey(systems, key) {
   var rows = Array.isArray(systems) ? systems : []
   for (var i = 0; i < rows.length; i++) if (rows[i].key === String(key || "")) return rows[i]

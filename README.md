@@ -53,7 +53,7 @@ Central Pacific, or all NHC basins.
 | Middle click the bar signal | Refresh NHC data |
 | Right click the bar signal | Open the NHC website |
 | Click a system or map marker | Select and fit that system |
-| Click a region heading | Fit every system in that region |
+| Click a region heading | Expand or collapse it; opening also fits the region |
 | Drag the map | Rotate the globe, which feels like panning at close scale |
 | Mouse wheel | Zoom at the pointer |
 | Up / Down | Select the previous or next cyclone or outlook area |

@@ -104,6 +104,25 @@ def safe_text(value: Any, limit: int = 160) -> str:
     return " ".join(text.split())[:limit]
 
 
+def readable_excerpt(value: Any, limit: int = 900) -> str:
+    text = safe_text(value, max(limit + 1, 4096))
+    if len(text) <= limit:
+        return text
+
+    # Prefer a complete sentence near the limit. When NHC's prose has one
+    # unusually long sentence, fall back to a complete word instead of
+    # exposing the backend's character boundary in the UI.
+    available = max(1, limit - 2)
+    window = text[:available]
+    sentence_ends = [match.end() for match in re.finditer(r"[.!?](?=\s|$)", window)]
+    if sentence_ends and sentence_ends[-1] >= int(limit * 0.62):
+        return window[: sentence_ends[-1]].rstrip() + " …"
+    word_boundary = window.rfind(" ")
+    if word_boundary > 0:
+        window = window[:word_boundary]
+    return window.rstrip(" ,;:-") + "…"
+
+
 def number(value: Any, fallback: float | None = None) -> float | None:
     try:
         parsed = float(value)
@@ -611,7 +630,7 @@ def parse_forecast_discussion(data: bytes) -> dict[str, str]:
     body_lines = body_lines[2:] if len(body_lines) >= 2 else body_lines
     paragraphs = [safe_text(part, 1800) for part in re.split(r"\n\s*\n", "\n".join(body_lines))]
     paragraphs = [part for part in paragraphs if part]
-    excerpt = safe_text(" ".join(paragraphs[:2]), 900)
+    excerpt = readable_excerpt(" ".join(paragraphs[:2]), 900)
     forecaster_match = re.search(r"Forecaster\s+([^\s<]+)", text, flags=re.IGNORECASE)
     return {
         "title": title,

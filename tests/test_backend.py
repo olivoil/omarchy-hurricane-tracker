@@ -78,6 +78,13 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("FORECAST POSITIONS", discussion["excerpt"])
         self.assertEqual(discussion["forecaster"], "Rivera")
 
+    def test_discussion_excerpt_ends_at_a_readable_boundary(self):
+        source = "forecast guidance " * 5 + "stays uncertain. " + "Later details " * 100
+        excerpt = omanado.readable_excerpt(source, 120)
+        self.assertLessEqual(len(excerpt), 120)
+        self.assertTrue(excerpt.endswith(". …"))
+        self.assertIn("stays uncertain", excerpt)
+
     def test_only_nhc_https_urls_are_accepted(self):
         self.assertTrue(omanado.is_safe_url("https://www.nhc.noaa.gov/CurrentStorms.json"))
         self.assertFalse(omanado.is_safe_url("http://www.nhc.noaa.gov/CurrentStorms.json"))
