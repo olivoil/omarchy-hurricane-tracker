@@ -15,7 +15,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertEqual(manifest["id"], "io.github.olivoil.omanado")
         self.assertEqual(manifest["name"], "Hurricane Tracker")
         self.assertEqual(manifest["barWidget"]["displayName"], "Hurricane Tracker")
-        self.assertEqual(manifest["version"], "0.2.0")
+        self.assertEqual(manifest["version"], "0.0.1")
         self.assertEqual(set(manifest["kinds"]), {"service", "overlay", "bar-widget"})
         for entry_point in manifest["entryPoints"].values():
             self.assertFalse(Path(entry_point).is_absolute())
@@ -26,6 +26,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertEqual(defaults["formationThreshold"], "Medium (40%)")
         self.assertTrue(defaults["notifyNamedStorms"])
         self.assertTrue((ROOT / "assets" / "hurricane-tracker.svg").is_file())
+        self.assertTrue((ROOT / "preview.png").is_file())
 
     def test_backend_is_executable(self):
         backend = ROOT / "bin" / "omanado-data"

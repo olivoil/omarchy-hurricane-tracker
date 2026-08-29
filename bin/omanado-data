@@ -28,7 +28,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 
-VERSION = "0.2.0"
+VERSION = "0.0.1"
 CURRENT_STORMS_URL = "https://www.nhc.noaa.gov/CurrentStorms.json"
 SOURCE_URL = "https://www.nhc.noaa.gov/"
 OUTLOOK_URLS = {
@@ -54,7 +54,7 @@ MAX_OUTLOOKS = 24
 MAX_TRACK_POINTS = 40
 MAX_PAST_POINTS = 256
 MAX_CONE_POINTS = 420
-USER_AGENT = f"HurricaneTracker/{VERSION} (+https://github.com/olivoil/omanado)"
+USER_AGENT = f"HurricaneTracker/{VERSION} (+https://github.com/olivoil/omarchy-hurricane-tracker)"
 
 CLASSIFICATION_LABELS = {
     "TD": "Tropical depression",
