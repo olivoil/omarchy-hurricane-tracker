@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC
 import Quickshell
+import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
@@ -17,6 +18,8 @@ Item {
   property string expandedRegion: ""
   property bool regionDisclosureInitialized: false
   property int clockTick: 0
+  property var userLocation: ({ name: "", latitude: null, longitude: null, valid: false })
+  property string mapNotice: ""
 
   readonly property var tracker: shell ? shell.serviceFor("io.github.olivoil.hurricane-tracker") : null
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
@@ -210,6 +213,16 @@ Item {
     if (tracker && tracker.refresh) tracker.refresh()
   }
 
+  function centerOnUserLocation() {
+    if (stormMap.centerOnUserLocation()) {
+      mapNotice = ""
+      keyCatcher.forceActiveFocus()
+      return
+    }
+    mapNotice = "Set a precise location in Omarchy Weather first"
+    mapNoticeTimer.restart()
+  }
+
   function officialUrl(storm, field) {
     return Model.safeOfficialUrl(storm && storm[field])
   }
@@ -244,6 +257,24 @@ Item {
     running: root.opened
     onTriggered: root.clockTick++
   }
+
+  FileView {
+    id: userLocationFile
+    path: Quickshell.env("HOME") + "/.local/state/omarchy/settings/weather.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.userLocation = Model.parseUserLocationFile(text())
+    onLoadFailed: root.userLocation = Model.parseUserLocationFile("")
+  }
+
+  Timer {
+    id: mapNoticeTimer
+    interval: 4000
+    onTriggered: root.mapNotice = ""
+  }
+
+  onOpenedChanged: if (opened) userLocationFile.reload()
 
   PanelWindow {
     id: panel
@@ -301,6 +332,9 @@ Item {
             event.accepted = true
           } else if (event.key === Qt.Key_Minus) {
             stormMap.zoomOut()
+            event.accepted = true
+          } else if (event.key === Qt.Key_L) {
+            root.centerOnUserLocation()
             event.accepted = true
           } else if (event.key === Qt.Key_F) {
             stormMap.resetView()
@@ -453,6 +487,7 @@ Item {
           storms: root.storms
           outlooks: root.outlooks
           selectedKey: root.selectedKey
+          userLocation: root.userLocation
           bottomInset: root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean
@@ -807,6 +842,7 @@ Item {
         }
 
         Column {
+          id: mapControls
           anchors.right: parent.right
           anchors.rightMargin: Style.spacing.lg
           anchors.bottom: timeline.visible ? timeline.top : parent.bottom
@@ -832,11 +868,26 @@ Item {
           }
           Button {
             iconText: "\uf05b"
+            tooltipText: root.userLocation.valid
+              ? "Center on " + (root.userLocation.name || "my location") + " (L)"
+              : "Set a precise location in Omarchy Weather"
+            focusable: true
+            selected: stormMap.userLocationCentered
+            foreground: root.userLocation.valid ? root.mapText : root.mapMuted
+            background: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.92)
+            onClicked: root.centerOnUserLocation()
+            Accessible.name: root.userLocation.valid
+              ? "Center map on " + (root.userLocation.name || "my location")
+              : "Location unavailable; set a precise location in Omarchy Weather"
+          }
+          Button {
+            iconText: "\uf065"
             tooltipText: "Fit selected system (F)"
             focusable: true
             foreground: root.mapText
             background: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.92)
             onClicked: stormMap.resetView()
+            Accessible.name: "Fit selected tropical system"
           }
           Button {
             iconText: "\uf0ac"
@@ -845,6 +896,30 @@ Item {
             foreground: root.mapText
             background: root.background
             onClicked: stormMap.showGlobe()
+          }
+        }
+
+        Rectangle {
+          visible: root.mapNotice !== ""
+          anchors.right: mapControls.left
+          anchors.rightMargin: Style.spacing.sm
+          anchors.bottom: mapControls.bottom
+          width: mapNoticeText.implicitWidth + Style.spacing.lg * 2
+          height: Style.space(34)
+          radius: 7
+          color: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.96)
+          border.width: 1
+          border.color: Qt.rgba(root.mapGrid.r, root.mapGrid.g, root.mapGrid.b, 0.36)
+          z: 4
+
+          Text {
+            id: mapNoticeText
+            anchors.centerIn: parent
+            text: root.mapNotice
+            textFormat: Text.PlainText
+            color: root.mapMuted
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
           }
         }
 
@@ -1066,7 +1141,7 @@ Item {
               anchors.rightMargin: Style.spacing.xs
               anchors.verticalCenter: parent.verticalCenter
               text: "View all"
-              iconText: "\uf05b"
+              iconText: "\uf065"
               tooltipText: "Fit every system in " + String(rowData.name || "this region")
               focusable: true
               foreground: root.foreground

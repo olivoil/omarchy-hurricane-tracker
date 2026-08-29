@@ -23,6 +23,27 @@ function validCoordinate(latitude, longitude) {
     && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
 }
 
+function parseUserLocationFile(raw) {
+  var unset = { name: "", latitude: null, longitude: null, valid: false }
+  try {
+    var data = JSON.parse(String(raw || ""))
+    if (!data || typeof data !== "object") return unset
+    var name = typeof data.name === "string"
+      ? data.name.replace(/^\s+|\s+$/g, "") : ""
+    if (data.latitude === null || data.latitude === undefined || data.latitude === ""
+        || data.longitude === null || data.longitude === undefined || data.longitude === "") {
+      return { name: name, latitude: null, longitude: null, valid: false }
+    }
+    var latitude = Number(data.latitude)
+    var longitude = Number(data.longitude)
+    if (!validCoordinate(latitude, longitude))
+      return { name: name, latitude: null, longitude: null, valid: false }
+    return { name: name, latitude: latitude, longitude: longitude, valid: true }
+  } catch (error) {
+    return unset
+  }
+}
+
 function pushCoordinate(output, item) {
   if (!item || !validCoordinate(item.latitude, item.longitude)) return
   output.push({ latitude: Number(item.latitude), longitude: Number(item.longitude) })

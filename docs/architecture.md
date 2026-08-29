@@ -6,7 +6,8 @@ Hurricane Tracker is one Omarchy plugin with three shell kinds:
 BarWidget.qml ─┐
                ├─ Service.qml ─ Process ─ bin/omanado-data ─ NOAA/NHC
 Omanado.qml ───┘                         └─ user cache
-     └─ StormMap.qml + Model.js + Natural Earth geometry
+     ├─ StormMap.qml + Model.js + Natural Earth geometry
+     └─ Omarchy Weather's local location state
 ```
 
 ## Shared service
@@ -51,9 +52,14 @@ after the bundled Natural Earth geometry has loaded. It draws:
 - the selected official cone;
 - a dashed preliminary past center track;
 - the solid official forecast center track and forecast intensity points;
-- current markers for every active system.
+- current markers for every active system;
+- the user's locally configured Omarchy Weather location, when available;
 - NHC formation areas and probability markers for developing and remnant
   systems.
+
+The overlay reads Weather's local `weather.json` state directly and only while
+rendering the interface. It does not request live positioning, send the
+coordinates over the network, or add them to Hurricane Tracker's cache.
 
 Shell chrome, land, ocean, grid, track, and cone colors are derived from the
 active Omarchy menu background, foreground, and accent. Storm intensity and

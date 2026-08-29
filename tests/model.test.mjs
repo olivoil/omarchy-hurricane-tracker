@@ -14,6 +14,15 @@ assert.equal(model.wrapLongitude(190), -170)
 assert.equal(model.longitudeNear(170, -175), 185)
 assert.equal(model.validCoordinate(20, -70), true)
 assert.equal(model.validCoordinate(100, -70), false)
+assert.deepEqual(
+  JSON.parse(JSON.stringify(model.parseUserLocationFile(
+    '{"name":"  Lagos del Sol  ","latitude":21.05417,"longitude":-86.84861}'
+  ))),
+  { name: "Lagos del Sol", latitude: 21.05417, longitude: -86.84861, valid: true }
+)
+assert.equal(model.parseUserLocationFile('{"name":"Cancun"}').valid, false)
+assert.equal(model.parseUserLocationFile('{"latitude":91,"longitude":0}').valid, false)
+assert.equal(model.parseUserLocationFile('not json').valid, false)
 
 const storm = {
   id: "al012026",
