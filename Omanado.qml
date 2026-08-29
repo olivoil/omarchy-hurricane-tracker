@@ -65,22 +65,34 @@ Item {
     return system && system.kind === "outlook" ? Model.outlookColor(system) : Model.severityColor(system)
   }
 
-  function systemStatusLabel(system) {
-    return system ? Model.systemClassificationLabel(system).toUpperCase() : ""
-  }
-
   function summaryFacts(system) {
     if (!system) return []
     if (system.kind === "outlook") return [
-      { value: String(system.twoDayChance || 0) + "% in 2 days" },
-      { value: String(system.sevenDayChance || 0) + "% in 7 days" },
-      { value: String(system.basinLabel || "") }
+      { label: "2-DAY CHANCE", value: String(system.twoDayChance || 0) + "%" },
+      { label: "7-DAY CHANCE", value: String(system.sevenDayChance || 0) + "%" },
+      { label: "BASIN", value: String(system.basinLabel || Model.regionName(system.basin)) }
     ]
     return [
-      { value: Model.formatWind(system) + " wind" },
-      { value: Model.formatPressure(system) },
-      { value: Model.formatMovement(system) }
+      { label: "MAX WIND", value: Model.formatWind(system) },
+      { label: "PRESSURE", value: Model.formatPressure(system) },
+      { label: "MOVEMENT", value: Model.formatMovement(system) }
     ]
+  }
+
+  function summaryContext(system) {
+    if (!system) return ""
+    var classification = Model.systemClassificationLabel(system)
+    if (system.kind === "outlook") return classification + " · NHC outlook"
+    var advisory = String(system.advisoryNumber || "").replace(/^0+/, "")
+    return classification + (advisory !== "" ? " · Advisory " + advisory : "")
+  }
+
+  function summaryAgeLabel(system) {
+    clockTick
+    if (!system) return ""
+    var age = Model.humanAge(system.updatedAt)
+    var partial = Array.isArray(system.dataWarnings) && system.dataWarnings.length > 0
+    return partial ? "Partial · " + age : age
   }
 
   function regionalRowsHeight(rows) {
@@ -166,6 +178,18 @@ Item {
     Qt.callLater(function() {
       var index = root.regionIndexForBasin(basin)
       if (index >= 0) systemList.positionViewAtIndex(index, ListView.Contain)
+    })
+    keyCatcher.forceActiveFocus()
+  }
+
+  function viewRegion(basin) {
+    if (!basin) return
+    expandedRegion = String(basin)
+    regionDisclosureInitialized = true
+    stormMap.fitRegion(basin)
+    Qt.callLater(function() {
+      var index = root.regionIndexForBasin(basin)
+      if (index >= 0) systemList.positionViewAtIndex(index, ListView.Beginning)
     })
     keyCatcher.forceActiveFocus()
   }
@@ -457,118 +481,172 @@ Item {
           onPointerActivity: keyCatcher.forceActiveFocus()
         }
 
-        Rectangle {
+        BorderSurface {
           id: stormSummary
           visible: root.selectedSystem !== null
           anchors.left: parent.left
           anchors.leftMargin: Style.spacing.lg
           anchors.top: parent.top
           anchors.topMargin: Style.spacing.lg
-          width: Math.min(Style.space(420), mapArea.width - Style.spacing.lg * 2)
-          height: Style.space(78)
-          radius: 9
-          color: root.background
-          border.width: 1
-          border.color: root.border
+          width: Math.min(Style.space(384), mapArea.width - Style.spacing.lg * 2)
+          height: Style.space(108)
+          radius: Style.cornerRadius
+          color: root.blendColor(root.background, root.foreground, root.lightTheme ? 0.018 : 0.028)
+          borderSpec: Border.surfaceSpec("menu", "border", root.border,
+            Math.max(1, Style.normalBorderWidth))
           z: 4
 
-          Text {
-            id: stormName
+          Item {
+            id: summaryIdentity
             anchors.left: parent.left
-            anchors.leftMargin: Style.spacing.lg
+            anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: Style.spacing.md
-            anchors.right: intensityBadge.left
-            anchors.rightMargin: Style.spacing.sm
-            text: root.selectedSystem ? String(root.selectedSystem.name || root.selectedSystem.title || "Tropical system") : ""
-            textFormat: Text.PlainText
-            color: root.foreground
-            elide: Text.ElideRight
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.heading
-            font.bold: true
+            height: Style.space(59)
+
+            Rectangle {
+              id: summaryBadge
+              anchors.left: parent.left
+              anchors.leftMargin: Style.spacing.lg
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(36)
+              height: width
+              radius: root.selectedStorm ? width / 2 : Style.space(8)
+              color: root.selectedSystem
+                ? Qt.rgba(Qt.color(root.systemColor(root.selectedSystem)).r,
+                  Qt.color(root.systemColor(root.selectedSystem)).g,
+                  Qt.color(root.systemColor(root.selectedSystem)).b, root.lightTheme ? 0.20 : 0.18)
+                : "transparent"
+              border.width: 1
+              border.color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.border
+
+              Text {
+                anchors.centerIn: parent
+                text: root.selectedSystem
+                  ? (root.selectedSystem.kind === "storm" ? Model.severityCode(root.selectedSystem)
+                    : String(root.selectedSystem.sevenDayChance || 0) + "%")
+                  : ""
+                textFormat: Text.PlainText
+                color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.foreground
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+            }
+
+            Column {
+              anchors.left: summaryBadge.right
+              anchors.leftMargin: Style.spacing.md
+              anchors.right: summaryAge.left
+              anchors.rightMargin: Style.spacing.md
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.xxs
+
+              Text {
+                width: parent.width
+                text: root.selectedSystem
+                  ? String(root.selectedSystem.name || root.selectedSystem.title || "Tropical system") : ""
+                textFormat: Text.PlainText
+                color: root.foreground
+                elide: Text.ElideRight
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.heading
+                font.bold: true
+              }
+
+              Text {
+                width: parent.width
+                text: root.summaryContext(root.selectedSystem)
+                textFormat: Text.PlainText
+                color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.dim
+                elide: Text.ElideRight
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Text {
+              id: summaryAge
+              anchors.right: parent.right
+              anchors.rightMargin: Style.spacing.lg
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.summaryAgeLabel(root.selectedSystem)
+              textFormat: Text.PlainText
+              color: root.selectedSystem && Array.isArray(root.selectedSystem.dataWarnings)
+                && root.selectedSystem.dataWarnings.length > 0 ? "#e9be62" : root.dim
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+            }
           }
 
           Rectangle {
-            id: intensityBadge
-            anchors.right: summaryAge.left
-            anchors.rightMargin: Style.spacing.sm
-            anchors.verticalCenter: stormName.verticalCenter
-            width: intensityText.implicitWidth + 14
-            height: intensityText.implicitHeight + 6
-            radius: height / 2
-            color: root.selectedSystem
-              ? Qt.rgba(Qt.color(root.systemColor(root.selectedSystem)).r,
-                Qt.color(root.systemColor(root.selectedSystem)).g,
-                Qt.color(root.systemColor(root.selectedSystem)).b, 0.18)
-              : "transparent"
-            border.width: 1
-            border.color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.border
-
-            Text {
-              id: intensityText
-              anchors.centerIn: parent
-              text: root.systemStatusLabel(root.selectedSystem)
-              textFormat: Text.PlainText
-              color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.foreground
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-          }
-
-          Text {
-            id: summaryAge
+            id: summaryDivider
+            anchors.left: parent.left
             anchors.right: parent.right
-            anchors.rightMargin: Style.spacing.lg
-            anchors.verticalCenter: stormName.verticalCenter
-            text: {
-              root.clockTick
-              if (!root.selectedSystem) return ""
-              if (root.selectedOutlook) return Model.humanAge(root.selectedOutlook.updatedAt)
-              if (!root.selectedStorm) return ""
-              var label = Model.advisoryLabel(root.selectedStorm)
-              return Array.isArray(root.selectedStorm.dataWarnings) && root.selectedStorm.dataWarnings.length > 0
-                ? "PARTIAL DATA · " + label : label
-            }
-            textFormat: Text.PlainText
-            color: root.selectedStorm && Array.isArray(root.selectedStorm.dataWarnings)
-              && root.selectedStorm.dataWarnings.length > 0 ? "#e9be62" : root.dim
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
+            anchors.top: summaryIdentity.bottom
+            height: 1
+            color: root.border
+            opacity: 0.72
           }
 
           Row {
-            id: summaryFactsRow
+            id: summaryMetrics
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
+            anchors.right: parent.right
+            anchors.rightMargin: Style.spacing.lg
+            anchors.top: summaryDivider.bottom
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.spacing.md
-            spacing: Style.spacing.md
 
             Repeater {
               model: root.summaryFacts(root.selectedSystem)
 
-              Row {
+              Item {
                 required property int index
                 required property var modelData
-                spacing: Style.spacing.md
+                width: summaryMetrics.width / 3
+                height: summaryMetrics.height
 
-                Text {
+                Rectangle {
                   visible: index > 0
-                  text: "·"
-                  textFormat: Text.PlainText
-                  color: root.dim
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: Style.font.bodySmall
+                  anchors.left: parent.left
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.spacing.md
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.spacing.md
+                  width: 1
+                  color: root.border
+                  opacity: 0.58
                 }
-                Text {
-                  text: String(modelData.value || "")
-                  textFormat: Text.PlainText
-                  color: root.foreground
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
+
+                Column {
+                  anchors.left: parent.left
+                  anchors.leftMargin: index > 0 ? Style.spacing.md : 0
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.md
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.spacing.xxs
+
+                  Text {
+                    width: parent.width
+                    text: String(modelData.label || "")
+                    textFormat: Text.PlainText
+                    color: root.dim
+                    elide: Text.ElideRight
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                    font.letterSpacing: 0.35
+                  }
+                  Text {
+                    width: parent.width
+                    text: String(modelData.value || "")
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    elide: Text.ElideRight
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                  }
                 }
               }
             }
@@ -954,7 +1032,7 @@ Item {
           height: Math.min(root.regionalRowsHeight(root.regionalRows),
             root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
               ? sidebar.height * 0.48
-              : sidebar.height - listHeader.height - sourceFooter.height)
+              : sidebar.height - listHeader.height)
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           model: root.regionalRows
@@ -998,10 +1076,10 @@ Item {
             }
 
             Text {
-              visible: rowData.kind === "region"
               anchors.right: regionTarget.left
               anchors.rightMargin: Style.spacing.sm
               anchors.verticalCenter: parent.verticalCenter
+              visible: rowData.kind === "region" && !systemRow.regionExpanded
               text: {
                 var parts = []
                 if (Number(rowData.activeCount || 0) > 0) parts.push(rowData.activeCount + " active")
@@ -1011,6 +1089,27 @@ Item {
               color: root.dim
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.caption
+            }
+
+            Button {
+              id: regionViewButton
+              visible: rowData.kind === "region" && systemRow.regionExpanded
+              anchors.right: regionTarget.left
+              anchors.rightMargin: Style.spacing.xs
+              anchors.verticalCenter: parent.verticalCenter
+              text: "View all"
+              iconText: "\uf05b"
+              tooltipText: "Fit every system in " + String(rowData.name || "this region")
+              focusable: true
+              foreground: root.foreground
+              accent: root.accent
+              fontSize: Style.font.caption
+              iconSize: Style.font.caption
+              horizontalPadding: Style.spacing.md
+              verticalPadding: Style.spacing.xs
+              z: 2
+              onClicked: root.viewRegion(rowData.basin)
+              Accessible.name: "View all systems in " + String(rowData.name || "this region")
             }
 
             Text {
@@ -1096,6 +1195,7 @@ Item {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
+              z: 1
               onClicked: {
                 if (rowData.kind === "region") root.toggleRegion(rowData.basin)
                 else if (system) root.selectSystem(system.key)
@@ -1120,8 +1220,11 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: systemList.bottom
-          anchors.bottom: sourceFooter.top
           visible: root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
+          height: visible ? Math.max(0, Math.min(
+            sidebar.height - y,
+            Math.min(Style.space(300), Style.space(86)
+              + Math.max(Style.space(68), Math.ceil(discussionText.implicitHeight))))) : 0
           clip: true
 
           Rectangle {
@@ -1149,8 +1252,8 @@ Item {
             font.letterSpacing: 0.45
           }
 
-          Text {
-            id: discussionText
+          Flickable {
+            id: discussionScroll
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
@@ -1159,24 +1262,37 @@ Item {
             anchors.topMargin: Style.spacing.sm
             anchors.bottom: discussionActions.top
             anchors.bottomMargin: Style.spacing.sm
-            text: root.selectedSystem ? Model.discussionExcerpt(root.selectedSystem) : ""
-            textFormat: Text.PlainText
-            wrapMode: Text.WordWrap
-            maximumLineCount: Math.max(4,
-              Math.floor(height / Math.max(1, Style.font.bodySmall * 1.2)))
-            elide: Text.ElideRight
-            color: root.foreground
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.bodySmall
-            lineHeight: 1.2
+            contentWidth: width
+            contentHeight: discussionText.implicitHeight
+            flickableDirection: Flickable.VerticalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            clip: true
+
+            Text {
+              id: discussionText
+              width: Math.max(0, discussionScroll.width - Style.spacing.md)
+              text: root.selectedSystem ? Model.discussionExcerpt(root.selectedSystem) : ""
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              color: root.foreground
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.bodySmall
+              lineHeight: 1.2
+            }
+
+            QQC.ScrollBar.vertical: QQC.ScrollBar {
+              policy: discussionScroll.contentHeight > discussionScroll.height
+                ? QQC.ScrollBar.AsNeeded : QQC.ScrollBar.AlwaysOff
+            }
           }
 
           Row {
             id: discussionActions
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.spacing.md
+            anchors.bottom: discussionSafety.top
+            anchors.bottomMargin: Style.spacing.sm
             spacing: Style.spacing.sm
 
             Button {
@@ -1201,48 +1317,16 @@ Item {
               onClicked: root.openOfficial(root.selectedSystem, "discussionUrl")
             }
           }
-        }
-
-        Item {
-          id: sourceFooter
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.bottom: parent.bottom
-          height: Style.space(68)
-
-          Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            height: 1
-            color: root.border
-          }
 
           Text {
-            id: alertStatusLabel
+            id: discussionSafety
             anchors.left: parent.left
             anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
-            anchors.top: parent.top
-            anchors.topMargin: Style.spacing.md
-            text: "Notifications: " + (root.tracker ? root.tracker.alertStatus : "Off")
-            textFormat: Text.PlainText
-            color: root.tracker && root.tracker.alertsEnabled ? root.accent : root.dim
-            elide: Text.ElideRight
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-
-          Text {
-            anchors.left: parent.left
-            anchors.leftMargin: Style.spacing.lg
-            anchors.right: parent.right
-            anchors.rightMargin: Style.spacing.lg
-            anchors.top: alertStatusLabel.bottom
-            anchors.topMargin: Style.spacing.sm
-            text: "Awareness only. Follow local emergency alerts."
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.spacing.md
+            text: "Awareness only. Follow local alerts."
             textFormat: Text.PlainText
             color: root.dim
             elide: Text.ElideRight
