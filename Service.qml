@@ -40,6 +40,7 @@ Item {
   property var pendingNotification: null
 
   readonly property string backendPath: Qt.resolvedUrl("bin/omanado-data").toString().replace(/^file:\/\//, "")
+  readonly property string notificationIconPath: Qt.resolvedUrl("assets/hurricane-tracker.svg").toString().replace(/^file:\/\//, "")
   readonly property string status: String(payload && payload.status || "loading")
   readonly property bool stale: payload && payload.stale === true
   readonly property string error: String(payload && payload.error || "")
@@ -157,8 +158,8 @@ Item {
   function sendNotification(notification) {
     notifyProcess.command = [
       "omarchy-notification-send",
-      "--app-name", "Omanado",
-      "-g", "\uf751",
+      "--app-name", "Hurricane Tracker",
+      "-i", notificationIconPath,
       "-u", "normal",
       notification.headline,
       notification.description

@@ -54,7 +54,7 @@ MAX_OUTLOOKS = 24
 MAX_TRACK_POINTS = 40
 MAX_PAST_POINTS = 256
 MAX_CONE_POINTS = 420
-USER_AGENT = f"Omanado/{VERSION} (+https://github.com/olivoil/omanado)"
+USER_AGENT = f"HurricaneTracker/{VERSION} (+https://github.com/olivoil/omanado)"
 
 CLASSIFICATION_LABELS = {
     "TD": "Tropical depression",

@@ -50,6 +50,7 @@ Item {
   readonly property int cardHeight: Math.min(Style.space(980), panel.height - Style.gapsOut * 2)
   readonly property int headerHeight: Style.space(66)
   readonly property int sidebarWidth: Math.min(Style.space(370), cardWidth * 0.35)
+  readonly property int timelineHeight: Style.space(100)
 
   function blendColor(first, second, amount) {
     var t = Math.max(0, Math.min(1, Number(amount)))
@@ -331,17 +332,15 @@ Item {
           color: root.border
         }
 
-        Text {
+        HurricaneIcon {
           id: brandIcon
           anchors.left: parent.left
           anchors.leftMargin: Style.spacing.panelPadding
           anchors.verticalCenter: parent.verticalCenter
-          text: "\uf751"
-          color: root.storms.length > 0 ? Model.severityColor(root.storms[0])
+          width: Style.space(21)
+          height: width
+          iconColor: root.storms.length > 0 ? Model.severityColor(root.storms[0])
             : (root.outlooks.length > 0 ? Model.outlookColor(root.outlooks[0]) : root.accent)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.heading + 5
-          renderType: Text.NativeRendering
         }
 
         Column {
@@ -351,7 +350,7 @@ Item {
           spacing: 1
 
           Text {
-            text: "OMANADO"
+            text: "HURRICANE TRACKER"
             textFormat: Text.PlainText
             color: root.foreground
             font.family: Style.font.menuFamily
@@ -454,7 +453,7 @@ Item {
           storms: root.storms
           outlooks: root.outlooks
           selectedKey: root.selectedKey
-          bottomInset: root.selectedStorm ? Style.space(116) : 0
+          bottomInset: root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean
           landColor: root.mapLand
@@ -557,7 +556,7 @@ Item {
             Text {
               id: summaryAge
               anchors.right: parent.right
-              anchors.rightMargin: Style.spacing.lg
+              anchors.rightMargin: Style.spacing.xxl
               anchors.verticalCenter: parent.verticalCenter
               text: root.summaryAgeLabel(root.selectedSystem)
               textFormat: Text.PlainText
@@ -714,7 +713,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: "The Atlantic, Eastern Pacific, and Central Pacific basins have no active cyclones or outlook areas. Omanado will keep checking."
+            text: "The Atlantic, Eastern Pacific, and Central Pacific basins have no active cyclones or outlook areas. Hurricane Tracker will keep checking."
             color: root.mapMuted
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.body
@@ -856,7 +855,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          height: Style.space(116)
+          height: root.timelineHeight
           color: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.95)
           z: 4
 
@@ -868,27 +867,9 @@ Item {
             color: Qt.rgba(root.mapGrid.r, root.mapGrid.g, root.mapGrid.b, 0.42)
           }
 
-          Text {
-            id: timelineTitle
-            anchors.left: parent.left
-            anchors.leftMargin: Style.spacing.lg
-            anchors.top: parent.top
-            anchors.topMargin: Style.spacing.sm
-            text: "NHC FORECAST"
-            color: root.mapMuted
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 0.5
-          }
-
           ListView {
             id: timelineList
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: timelineTitle.bottom
-            anchors.bottom: parent.bottom
-            anchors.topMargin: Style.spacing.xs
+            anchors.fill: parent
             orientation: ListView.Horizontal
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -932,7 +913,7 @@ Item {
               Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
-                anchors.topMargin: Style.space(49)
+                anchors.topMargin: Style.space(51)
                 width: parent.width - Style.spacing.sm
                 horizontalAlignment: Text.AlignHCenter
                 elide: Text.ElideRight
@@ -944,7 +925,7 @@ Item {
               Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
-                anchors.topMargin: Style.space(66)
+                anchors.topMargin: Style.space(73)
                 text: String(forecast.windMph || 0) + " mph"
                 color: Model.severityColor(forecast)
                 font.family: Style.font.menuFamily
@@ -1046,7 +1027,7 @@ Item {
               anchors.bottom: parent.bottom
               height: 1
               color: root.border
-              opacity: rowData.kind === "region" ? 1 : 0.62
+              opacity: rowData.kind === "region" ? 0.44 : 0.62
             }
 
             Text {

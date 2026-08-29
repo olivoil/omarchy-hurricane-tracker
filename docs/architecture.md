@@ -1,6 +1,6 @@
 # Architecture
 
-Omanado is one Omarchy plugin with three shell kinds:
+Hurricane Tracker is one Omarchy plugin with three shell kinds:
 
 ```text
 BarWidget.qml ─┐
@@ -61,7 +61,7 @@ formation probability retain a small stable semantic palette so their meaning
 does not change when the desktop theme changes.
 
 There is intentionally no simulated or decorative wind field. Motion that
-looks meteorological can be mistaken for observed conditions, so Omanado only
+looks meteorological can be mistaken for observed conditions, so Hurricane Tracker only
 renders data it can name and source.
 
 ## Payload contract

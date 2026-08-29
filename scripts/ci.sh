@@ -10,7 +10,7 @@ node --test tests/model.test.mjs
 node scripts/build-map-data.mjs --check
 
 if command -v qmllint >/dev/null 2>&1; then
-  qmllint -I /usr/share/omarchy/shell BarWidget.qml Service.qml StormMap.qml Omanado.qml
+  qmllint -I /usr/share/omarchy/shell HurricaneIcon.qml BarWidget.qml Service.qml StormMap.qml Omanado.qml
 fi
 
 if command -v omarchy >/dev/null 2>&1; then

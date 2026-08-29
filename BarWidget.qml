@@ -23,7 +23,7 @@ BarWidget {
   }
 
   function tooltip() {
-    if (!tracker || (!tracker.hasLoaded && tracker.loading)) return "Omanado is checking the National Hurricane Center"
+    if (!tracker || (!tracker.hasLoaded && tracker.loading)) return "Hurricane Tracker is checking the National Hurricane Center"
     var summary = Model.trackingSummary(tracker.storms, tracker.outlooks)
     if (tracker.stale) summary = "Saved advisory: " + summary
     return summary + "  ·  left open  ·  middle refresh  ·  right NHC"
@@ -39,11 +39,41 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.trackingCount > 0 ? "\uf751  " + root.trackingCount : "\uf751"
+    text: " "
+    labelVisible: false
+    fixedWidth: Math.max(Style.space(24), barContent.implicitWidth + Style.space(10))
     active: root.trackingCount > 0
     activeColor: root.strongestStorm ? Model.severityColor(root.strongestStorm)
       : (root.bar ? root.bar.barForeground : Color.foreground)
     tooltipText: root.tooltip()
+
+    Row {
+      id: barContent
+      anchors.centerIn: parent
+      spacing: Style.spacing.xxs
+
+      readonly property color contentColor: button.active ? button.activeColor : button.foreground
+
+      HurricaneIcon {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.font.icon
+        height: width
+        iconColor: barContent.contentColor
+      }
+
+      Text {
+        visible: root.trackingCount > 0
+        anchors.verticalCenter: parent.verticalCenter
+        text: String(root.trackingCount)
+        textFormat: Text.PlainText
+        color: barContent.contentColor
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        font.bold: true
+
+        Behavior on color { ColorAnimation { duration: 160 } }
+      }
+    }
 
     onPressed: function(mouseButton) {
       if (!root.bar) return

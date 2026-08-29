@@ -10,9 +10,9 @@ Natural Earth data is in the public domain. See
 
 ## NOAA and National Hurricane Center data
 
-Omanado retrieves public weather products from the National Oceanic and
+Hurricane Tracker retrieves public weather products from the National Oceanic and
 Atmospheric Administration's National Hurricane Center. NOAA and NHC names are
-used only to identify the source. They do not imply endorsement of Omanado.
+used only to identify the source. They do not imply endorsement of Hurricane Tracker.
 
 NHC notes that its GIS feeds are experimental conveniences, may not always be
 available or timely, and must not be relied upon for life-threatening

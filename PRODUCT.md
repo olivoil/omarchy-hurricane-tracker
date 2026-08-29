@@ -1,4 +1,4 @@
-# Omanado
+# Hurricane Tracker
 
 ## Register
 
@@ -10,11 +10,11 @@ Omarchy users who live in, travel through, or care about hurricane-prone regions
 
 ## Product Purpose
 
-Omanado is a native Omarchy tropical-system tracker. A compact bar status opens a spatial, source-forward view of National Hurricane Center cyclones, forecast tracks, uncertainty cones, developing areas, and discussions. Success means a user can scan a region, understand a selected system in seconds, and opt into calm threshold-based awareness without mistaking the plugin for local emergency guidance.
+Hurricane Tracker is a native Omarchy tropical-system tracker. A compact bar status opens a spatial, source-forward view of National Hurricane Center cyclones, forecast tracks, uncertainty cones, developing areas, and discussions. Success means a user can scan a region, understand a selected system in seconds, and opt into calm threshold-based awareness without mistaking the plugin for local emergency guidance.
 
 ## Brand Personality
 
-Calm, exact, atmospheric. Omanado should feel composed during uncertain conditions, technically credible without looking clinical, and at home in the Omarchy desktop.
+Calm, exact, atmospheric. Hurricane Tracker should feel composed during uncertain conditions, technically credible without looking clinical, and at home in the Omarchy desktop.
 
 ## Anti-references
 

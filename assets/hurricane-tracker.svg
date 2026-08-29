@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Hurricane Tracker</title>
+  <g fill="none" stroke="#45c6b5" stroke-linecap="round" stroke-linejoin="round" stroke-width="6.5">
+    <path d="M7 31C10 12 31 4 47 13C55 18 58 27 53 34C49 40 41 41 35 37"/>
+    <path d="M57 33C54 52 33 60 17 51C9 46 6 37 11 30C15 24 23 23 29 27"/>
+  </g>
+  <circle cx="32" cy="32" r="4.5" fill="#45c6b5"/>
+</svg>

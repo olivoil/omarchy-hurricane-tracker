@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "io.github.olivoil.omanado",
-  "name": "Omanado",
+  "name": "Hurricane Tracker",
   "version": "0.2.0",
   "author": "Olivier Melcher",
   "license": "MIT",
-  "description": "A calm, native Omarchy tracker for NHC cyclones, regional outlooks, forecast tracks, and discussions.",
+  "description": "A calm, native Omarchy hurricane tracker for NHC cyclones, regional outlooks, forecast tracks, and discussions.",
   "homepage": "https://github.com/olivoil/omanado",
   "repository": "https://github.com/olivoil/omanado",
   "keywords": [
@@ -27,7 +27,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Omanado",
+    "displayName": "Hurricane Tracker",
     "description": "Active NHC storms and forecast tracks",
     "category": "Info",
     "allowMultiple": false,
@@ -47,7 +47,7 @@
         "max": 60,
         "step": 5,
         "defaultValue": 15,
-        "description": "How often Omanado checks the National Hurricane Center for updates."
+        "description": "How often Hurricane Tracker checks the National Hurricane Center for updates."
       },
       {
         "key": "alertRegion",

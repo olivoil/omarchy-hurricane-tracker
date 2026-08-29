@@ -1,9 +1,13 @@
-# Omanado
+# Hurricane Tracker
 
-Omanado is a native Omarchy hurricane tracker. Its bar signal opens a calm,
+Hurricane Tracker is a native Omarchy weather plugin. Its compact bar signal
+opens a calm,
 spatial view of active National Hurricane Center cyclones, their past and
 forecast center tracks, official cone of uncertainty, and regional development
 outlooks.
+
+The project keeps its original `io.github.olivoil.omanado` plugin ID, repository
+name, and cache path so existing installations continue to update normally.
 
 The interaction rhythm is inspired by Windy's hurricane view, but the plugin
 uses its own native QML interface, public-domain map geometry, and official
@@ -27,7 +31,7 @@ NOAA/NHC data. It does not use Windy assets or APIs.
 - Falls back to a clearly marked cached advisory when NHC is unavailable
 - Requires no API key and adds no background daemon
 
-Omanado currently covers the Atlantic, Eastern Pacific, and Central Pacific
+Hurricane Tracker currently covers the Atlantic, Eastern Pacific, and Central Pacific
 basins represented by the NHC feed. It is not yet a global JTWC tracker.
 
 ## Install
@@ -38,7 +42,7 @@ omarchy plugin add https://github.com/olivoil/omanado.git --enable
 
 The refresh interval and regional alerts can be changed in Omarchy's bar
 settings. Polling defaults to 15 minutes. Alerts default to off; when enabled,
-Omanado quietly records the current systems as its baseline and only announces
+Hurricane Tracker quietly records the current systems as its baseline and only announces
 a later threshold crossing or newly advised cyclone.
 
 Formation thresholds follow the NHC seven-day outlook bands exposed by the
@@ -49,7 +53,7 @@ Central Pacific, or all NHC basins.
 
 | Input | Action |
 | --- | --- |
-| Left click the bar signal | Open or close Omanado |
+| Left click the bar signal | Open or close Hurricane Tracker |
 | Middle click the bar signal | Refresh NHC data |
 | Right click the bar signal | Open the NHC website |
 | Click a system or map marker | Select and fit that system |
@@ -73,7 +77,7 @@ tracks, cones, and preliminary best tracks come from the KMZ links in that
 official feed. Formation areas, probabilities, remnant systems such as Dolly,
 and their narratives come from NHC's Graphical Tropical Weather Outlook KMZ
 products. Forecast-discussion excerpts come from the linked NHC text product.
-Omanado only permits HTTPS requests to NHC-owned hostnames and bounds every
+Hurricane Tracker only permits HTTPS requests to NHC-owned hostnames and bounds every
 response and expanded archive before parsing it.
 
 The last normalized response is stored at
@@ -81,7 +85,7 @@ The last normalized response is stored at
 `XDG_CACHE_HOME` is unset. The cache contains public weather data only and is
 written with user-only permissions.
 
-Omanado is an awareness tool, not an emergency warning system. The forecast
+Hurricane Tracker is an awareness tool, not an emergency warning system. The forecast
 cone describes the probable path of the storm center. Hazardous wind, rain,
 surge, and tornadoes can occur well outside it. Follow local emergency
 management and official weather guidance.
@@ -108,6 +112,6 @@ See [`docs/architecture.md`](docs/architecture.md) for the data and UI split.
 
 ## License
 
-Omanado is available under the MIT License. The bundled Natural Earth geometry
+Hurricane Tracker is available under the MIT License. The bundled Natural Earth geometry
 is public domain; see [`assets/NATURAL_EARTH.md`](assets/NATURAL_EARTH.md) and
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

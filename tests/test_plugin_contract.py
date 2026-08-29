@@ -13,6 +13,8 @@ class PluginContractTests(unittest.TestCase):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["schemaVersion"], 1)
         self.assertEqual(manifest["id"], "io.github.olivoil.omanado")
+        self.assertEqual(manifest["name"], "Hurricane Tracker")
+        self.assertEqual(manifest["barWidget"]["displayName"], "Hurricane Tracker")
         self.assertEqual(manifest["version"], "0.2.0")
         self.assertEqual(set(manifest["kinds"]), {"service", "overlay", "bar-widget"})
         for entry_point in manifest["entryPoints"].values():
@@ -23,6 +25,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertEqual(defaults["alertRegion"], "Off")
         self.assertEqual(defaults["formationThreshold"], "Medium (40%)")
         self.assertTrue(defaults["notifyNamedStorms"])
+        self.assertTrue((ROOT / "assets" / "hurricane-tracker.svg").is_file())
 
     def test_backend_is_executable(self):
         backend = ROOT / "bin" / "omanado-data"
