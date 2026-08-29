@@ -65,6 +65,7 @@ you will not get a burst of notifications for storms already underway.
 | Mouse wheel | Zoom at the pointer |
 | Up / Down | Select the previous or next system |
 | `+` / `-` | Zoom in or out |
+| Click the crosshair or press `L` | Center the location configured in Omarchy Weather |
 | `F` | Fit the selected system |
 | `G` or `0` | Show the whole globe |
 | `R` | Refresh |
@@ -82,6 +83,11 @@ products for forecast discussion excerpts.
 
 Network requests are limited to NHC-owned HTTPS hosts, and downloads and
 expanded archives are size-limited before parsing.
+
+The map's crosshair reads the coordinates already configured in Omarchy
+Weather from local state. Hurricane Tracker does not transmit or persist that
+location itself. If Weather only uses automatic IP detection, choose a precise
+location there before using the crosshair.
 
 The latest data is cached at `~/.cache/omanado/storms.json`. If you have set
 `$XDG_CACHE_HOME`, the cache is stored in `$XDG_CACHE_HOME/omanado/storms.json`

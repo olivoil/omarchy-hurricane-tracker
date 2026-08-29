@@ -8,9 +8,12 @@ Item {
   property var storms: []
   property var outlooks: []
   property string selectedKey: ""
+  property var userLocation: ({ name: "", latitude: null, longitude: null, valid: false })
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property bool selectedIsStorm: selectedSystem && selectedSystem.kind === "storm"
+  readonly property bool hasUserLocation: userLocation && userLocation.valid === true
+    && Model.validCoordinate(userLocation.latitude, userLocation.longitude)
 
   property real centreLatitude: 18
   property real centreLongitude: -78
@@ -25,6 +28,9 @@ Item {
   readonly property real baseGlobeRadius: Math.max(80, Math.min(width, viewHeight) * 0.43)
   readonly property real globeRadius: baseGlobeRadius * zoom
   readonly property bool wholeGlobeVisible: globeRadius <= Math.min(width, viewHeight) / 2 - 8
+  readonly property bool userLocationCentered: hasUserLocation
+    && Math.abs(centreLatitude - Number(userLocation.latitude)) < 0.001
+    && Math.abs(Model.longitudeNear(centreLongitude, userLocation.longitude) - centreLongitude) < 0.001
 
   property color oceanColor: "#102f38"
   property color deepOceanColor: "#0a242c"
@@ -52,6 +58,7 @@ Item {
 
   Accessible.name: "NHC tropical systems map"
   Accessible.description: "Drag to pan or rotate the globe, use the wheel to zoom, and select a cyclone or outlook marker"
+    + (hasUserLocation ? ". Your configured Weather location is also marked" : "")
   Accessible.role: Accessible.Pane
 
   function coordinateLatitude(value) {
@@ -160,6 +167,17 @@ Item {
   function zoomIn() { zoomAt(1.32) }
   function zoomOut() { zoomAt(1 / 1.32) }
   function resetView() { fitSelected() }
+
+  function centerOnUserLocation() {
+    if (!hasUserLocation) return false
+    centreLatitude = Model.clamp(Number(userLocation.latitude), -82, 82)
+    centreLongitude = Model.wrapLongitude(Number(userLocation.longitude))
+    zoom = Math.max(1.7, zoom)
+    userMoved = true
+    clearHover()
+    canvas.requestPaint()
+    return true
+  }
 
   function clearHover() {
     hoveredKey = ""
@@ -515,6 +533,23 @@ Item {
     context.fillText(String(storm.name || "").toUpperCase(), point.x + radius + 8, point.y - 1)
   }
 
+  function drawUserLocation(context) {
+    if (!hasUserLocation) return
+    var point = project(userLocation.latitude, userLocation.longitude)
+    if (!point.visible || point.x < -20 || point.x > width + 20 || point.y < -20 || point.y > height + 20) return
+    context.fillStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, 0.16)
+    context.beginPath()
+    context.arc(point.x, point.y, 10, 0, Math.PI * 2)
+    context.fill()
+    context.fillStyle = coneColor
+    context.strokeStyle = deepOceanColor
+    context.lineWidth = 2
+    context.beginPath()
+    context.arc(point.x, point.y, 5, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+  }
+
   function paint(context) {
     context.clearRect(0, 0, width, height)
     drawBackground(context)
@@ -530,6 +565,7 @@ Item {
       drawForecastTrack(context, selectedSystem)
     }
     for (var s = 0; s < systems.length; s++) if (systems[s].kind === "storm") drawStormMarker(context, systems[s])
+    drawUserLocation(context)
     context.restore()
     context.strokeStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, wholeGlobeVisible ? 0.24 : 0.12)
     context.lineWidth = 1
@@ -683,6 +719,7 @@ Item {
   onStormsChanged: canvas.requestPaint()
   onOutlooksChanged: canvas.requestPaint()
   onSelectedKeyChanged: Qt.callLater(root.fitSelected)
+  onUserLocationChanged: canvas.requestPaint()
   onCentreLatitudeChanged: canvas.requestPaint()
   onCentreLongitudeChanged: canvas.requestPaint()
   onZoomChanged: canvas.requestPaint()
