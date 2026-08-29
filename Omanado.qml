@@ -15,8 +15,15 @@ Item {
   property bool opened: false
   property string selectedKey: ""
   property string expandedRegion: ""
-  property bool regionDisclosureInitialized: false
+  property string viewKind: "initial"
+  property string viewBasin: ""
+  property bool viewStateInitialized: false
+  property bool viewStateTouched: false
+  property bool viewPersistPending: false
   property int clockTick: 0
+
+  readonly property string moduleId: (manifest && manifest.id)
+    || "io.github.olivoil.hurricane-tracker"
 
   readonly property var tracker: shell ? shell.serviceFor("io.github.olivoil.hurricane-tracker") : null
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
@@ -96,18 +103,127 @@ Item {
     return partial ? "Partial · " + age : age
   }
 
+  function hydrateViewState() {
+    if (viewStateInitialized || viewStateTouched) return true
+    if (!tracker || !tracker.settingsReady) return false
+
+    viewKind = Model.normalizedViewKind(tracker.setting("lastViewKind", "initial"))
+    viewBasin = Model.normalizedRegion(tracker.setting("lastViewRegion", ""))
+    selectedKey = String(tracker.setting("lastSelectedKey", ""))
+    if (viewKind === "region") selectedKey = ""
+    if ((viewKind === "region" || viewKind === "system") && viewBasin !== "")
+      expandedRegion = viewBasin
+    viewStateInitialized = true
+    return true
+  }
+
+  function persistViewState() {
+    if (!viewPersistPending || !tracker || !tracker.settingsReady
+        || !shell || typeof shell.updateEntryInline !== "function") return false
+
+    var settings = ({})
+    for (var key in tracker.settings) if (key !== "id") settings[key] = tracker.settings[key]
+    settings.lastViewKind = viewKind
+    settings.lastViewRegion = viewBasin
+    settings.lastSelectedKey = selectedKey
+
+    var entry = { id: moduleId }
+    for (var settingKey in settings) entry[settingKey] = settings[settingKey]
+    viewPersistPending = false
+    tracker.settings = settings
+    shell.updateEntryInline(moduleId, entry)
+    return true
+  }
+
+  function rememberView() {
+    viewStateInitialized = true
+    viewStateTouched = true
+    viewPersistPending = true
+    persistViewState()
+  }
+
+  function applyPersistedViewSettings() {
+    if (!tracker || !tracker.settingsReady) return
+    if (!viewStateInitialized && !viewStateTouched) {
+      if (hydrateViewState()) {
+        syncViewState()
+        if (opened) Qt.callLater(stormMap.fitCurrent)
+      }
+    } else if (viewPersistPending) {
+      persistViewState()
+    }
+  }
+
+  function syncViewState() {
+    hydrateViewState()
+    var previousKind = viewKind
+    var previousBasin = viewBasin
+    var previousKey = selectedKey
+    var next = Model.viewStateAfterRefresh(
+      systems, viewKind, viewBasin, selectedKey, tracker && tracker.hasLoaded)
+
+    viewKind = next.kind
+    viewBasin = next.region
+    selectedKey = next.selectedKey
+    if ((viewKind === "region" || viewKind === "system") && viewBasin !== "")
+      expandedRegion = viewBasin
+
+    var changed = previousKind !== viewKind || previousBasin !== viewBasin
+      || previousKey !== selectedKey
+    if (changed && (viewStateTouched || previousKind !== "initial")) {
+      viewPersistPending = true
+      persistViewState()
+    }
+
+    Qt.callLater(function() {
+      var sectionIndex = -1
+      if (root.selectedKey !== "") {
+        var rowIndex = root.rowIndexForKey(root.selectedKey)
+        sectionIndex = root.regionRowForIndex(rowIndex)
+      } else if (root.viewKind === "region") {
+        sectionIndex = root.regionIndexForBasin(root.viewBasin)
+      }
+      if (sectionIndex >= 0) systemList.positionViewAtIndex(sectionIndex, ListView.Beginning)
+    })
+  }
+
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
-    if (payload.stormId) selectedKey = "storm:" + String(payload.stormId)
-    if (payload.outlookId) selectedKey = "outlook:" + String(payload.outlookId)
+    hydrateViewState()
+
+    var explicitView = false
+    if (payload.stormId) {
+      viewKind = "system"
+      viewBasin = ""
+      selectedKey = "storm:" + String(payload.stormId)
+      explicitView = true
+    }
+    if (payload.outlookId) {
+      viewKind = "system"
+      viewBasin = ""
+      selectedKey = "outlook:" + String(payload.outlookId)
+      explicitView = true
+    }
+    if (payload.globe === true) {
+      viewKind = "globe"
+      explicitView = true
+    }
+    if (explicitView) {
+      viewStateInitialized = true
+      viewStateTouched = true
+    }
+
     opened = true
-    syncSelection(true)
+    syncViewState()
+    if (explicitView) {
+      viewPersistPending = true
+      persistViewState()
+    }
     if (tracker && !tracker.hasLoaded && !tracker.loading) tracker.refresh()
     Qt.callLater(function() {
       keyCatcher.forceActiveFocus()
-      if (payload.globe === true) stormMap.showGlobe()
-      else stormMap.fitSelected()
+      stormMap.fitCurrent()
     })
   }
 
@@ -116,28 +232,15 @@ Item {
   }
 
   function showGlobe(_payload) {
+    viewKind = "globe"
+    rememberView()
     stormMap.showGlobe()
   }
 
   function dismiss() {
     close()
     if (shell && typeof shell.hide === "function")
-      shell.hide((manifest && manifest.id) || "io.github.olivoil.hurricane-tracker")
-  }
-
-  function syncSelection(forceReveal) {
-    var previousKey = selectedKey
-    selectedKey = Model.selectedKeyAfterRefresh(systems, selectedKey)
-    var selected = Model.systemByKey(systems, selectedKey)
-    if (selected && (forceReveal || selected.key !== previousKey || !regionDisclosureInitialized)) {
-      expandedRegion = String(selected.basin || "")
-      regionDisclosureInitialized = true
-    }
-    Qt.callLater(function() {
-      var rowIndex = root.rowIndexForKey(root.selectedKey)
-      var sectionIndex = regionRowForIndex(rowIndex)
-      if (sectionIndex >= 0) systemList.positionViewAtIndex(sectionIndex, ListView.Beginning)
-    })
+      shell.hide(moduleId)
   }
 
   function rowIndexForKey(key) {
@@ -163,9 +266,16 @@ Item {
 
   function toggleRegion(basin) {
     var opening = expandedRegion !== basin
-    expandedRegion = opening ? basin : ""
-    regionDisclosureInitialized = true
-    if (opening) stormMap.fitRegion(basin)
+    if (opening) {
+      viewKind = "region"
+      viewBasin = Model.normalizedRegion(basin)
+      selectedKey = ""
+      expandedRegion = viewBasin
+      rememberView()
+      Qt.callLater(stormMap.fitCurrent)
+    } else {
+      expandedRegion = ""
+    }
     Qt.callLater(function() {
       var index = root.regionIndexForBasin(basin)
       if (index >= 0) systemList.positionViewAtIndex(index, ListView.Contain)
@@ -174,12 +284,16 @@ Item {
   }
 
   function viewRegion(basin) {
-    if (!basin) return
-    expandedRegion = String(basin)
-    regionDisclosureInitialized = true
-    stormMap.fitRegion(basin)
+    var region = Model.normalizedRegion(basin)
+    if (region === "") return
+    viewKind = "region"
+    viewBasin = region
+    selectedKey = ""
+    expandedRegion = region
+    rememberView()
+    Qt.callLater(stormMap.fitCurrent)
     Qt.callLater(function() {
-      var index = root.regionIndexForBasin(basin)
+      var index = root.regionIndexForBasin(region)
       if (index >= 0) systemList.positionViewAtIndex(index, ListView.Beginning)
     })
     keyCatcher.forceActiveFocus()
@@ -188,9 +302,11 @@ Item {
   function selectSystem(key) {
     var system = Model.systemByKey(systems, key)
     if (!system) return
+    viewKind = "system"
+    viewBasin = Model.normalizedRegion(system.basin)
     selectedKey = key
-    expandedRegion = String(system.basin || "")
-    regionDisclosureInitialized = true
+    expandedRegion = viewBasin
+    rememberView()
     Qt.callLater(function() {
       var rowIndex = root.rowIndexForKey(key)
       if (rowIndex >= 0) systemList.positionViewAtIndex(rowIndex, ListView.Contain)
@@ -200,6 +316,16 @@ Item {
 
   function moveSelection(delta) {
     if (systems.length === 0) return
+    if (selectedKey === "") {
+      var regionalSystems = []
+      for (var r = 0; r < systems.length; r++) {
+        if (viewKind !== "region" || systems[r].basin === viewBasin)
+          regionalSystems.push(systems[r])
+      }
+      if (regionalSystems.length === 0) return
+      selectSystem(regionalSystems[delta < 0 ? regionalSystems.length - 1 : 0].key)
+      return
+    }
     var current = 0
     for (var i = 0; i < systems.length; i++) if (systems[i].key === selectedKey) current = i
     var next = (current + delta + systems.length) % systems.length
@@ -229,8 +355,13 @@ Item {
 
   Connections {
     target: root.tracker
-    function onStormsChanged() { root.syncSelection(false) }
-    function onOutlooksChanged() { root.syncSelection(false) }
+    function onStormsChanged() { root.syncViewState() }
+    function onOutlooksChanged() { root.syncViewState() }
+    function onHasLoadedChanged() {
+      if (root.tracker && root.tracker.hasLoaded) root.syncViewState()
+    }
+    function onSettingsChanged() { root.applyPersistedViewSettings() }
+    function onSettingsReadyChanged() { root.applyPersistedViewSettings() }
   }
 
   Connections {
@@ -306,7 +437,7 @@ Item {
             stormMap.resetView()
             event.accepted = true
           } else if (event.key === Qt.Key_0 || event.key === Qt.Key_G) {
-            stormMap.showGlobe()
+            root.showGlobe(null)
             event.accepted = true
           } else if (event.key === Qt.Key_O && root.selectedStorm) {
             root.openOfficial(root.selectedStorm, "advisoryUrl")
@@ -453,6 +584,9 @@ Item {
           storms: root.storms
           outlooks: root.outlooks
           selectedKey: root.selectedKey
+          fitMode: root.viewKind === "region" ? "region"
+            : (root.viewKind === "globe" ? "globe" : "system")
+          regionKey: root.viewBasin
           bottomInset: root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean
@@ -832,7 +966,9 @@ Item {
           }
           Button {
             iconText: "\uf05b"
-            tooltipText: "Fit selected system (F)"
+            tooltipText: root.viewKind === "region" && root.viewBasin !== ""
+              ? "Fit " + Model.regionName(root.viewBasin) + " (F)"
+              : (root.selectedSystem ? "Fit selected system (F)" : "Reset map view (F)")
             focusable: true
             foreground: root.mapText
             background: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.92)
@@ -844,7 +980,7 @@ Item {
             focusable: true
             foreground: root.mapText
             background: root.background
-            onClicked: stormMap.showGlobe()
+            onClicked: root.showGlobe(null)
           }
         }
 

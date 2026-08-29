@@ -8,9 +8,13 @@ Item {
   property var storms: []
   property var outlooks: []
   property string selectedKey: ""
+  property string fitMode: selectedKey !== "" ? "system" : "globe"
+  property string regionKey: ""
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property bool selectedIsStorm: selectedSystem && selectedSystem.kind === "storm"
+  readonly property bool selectionPending: fitMode === "system"
+    && selectedKey !== "" && selectedSystem === null
 
   property real centreLatitude: 18
   property real centreLongitude: -78
@@ -115,6 +119,12 @@ Item {
     )
   }
 
+  function fitCurrent() {
+    if (fitMode === "region" && regionKey !== "") fitRegion(regionKey)
+    else if (fitMode === "globe") showGlobe()
+    else fitSelected()
+  }
+
   function showGlobe(basin) {
     if (basin) {
       var bounds = Model.regionBounds(storms, outlooks, basin)
@@ -159,7 +169,7 @@ Item {
 
   function zoomIn() { zoomAt(1.32) }
   function zoomOut() { zoomAt(1 / 1.32) }
-  function resetView() { fitSelected() }
+  function resetView() { fitCurrent() }
 
   function clearHover() {
     hoveredKey = ""
@@ -680,17 +690,29 @@ Item {
     }
   }
 
-  onStormsChanged: canvas.requestPaint()
-  onOutlooksChanged: canvas.requestPaint()
-  onSelectedKeyChanged: Qt.callLater(root.fitSelected)
+  onStormsChanged: {
+    canvas.requestPaint()
+    if (fitMode === "region" && !userMoved) Qt.callLater(root.fitCurrent)
+  }
+  onOutlooksChanged: {
+    canvas.requestPaint()
+    if (fitMode === "region" && !userMoved) Qt.callLater(root.fitCurrent)
+  }
+  onSelectedKeyChanged: Qt.callLater(root.fitCurrent)
+  onFitModeChanged: Qt.callLater(root.fitCurrent)
+  onRegionKeyChanged: Qt.callLater(root.fitCurrent)
+  onSelectionPendingChanged: {
+    if (!selectionPending && fitMode === "system" && selectedSystem)
+      Qt.callLater(root.fitCurrent)
+  }
   onCentreLatitudeChanged: canvas.requestPaint()
   onCentreLongitudeChanged: canvas.requestPaint()
   onZoomChanged: canvas.requestPaint()
-  onWidthChanged: if (!userMoved) Qt.callLater(root.fitSelected)
-  onHeightChanged: if (!userMoved) Qt.callLater(root.fitSelected)
-  onBottomInsetChanged: if (!userMoved) Qt.callLater(root.fitSelected)
+  onWidthChanged: if (!userMoved) Qt.callLater(root.fitCurrent)
+  onHeightChanged: if (!userMoved) Qt.callLater(root.fitCurrent)
+  onBottomInsetChanged: if (!userMoved) Qt.callLater(root.fitCurrent)
   onOceanColorChanged: canvas.requestPaint()
   onLandColorChanged: canvas.requestPaint()
   onConeColorChanged: canvas.requestPaint()
-  Component.onCompleted: Qt.callLater(root.fitSelected)
+  Component.onCompleted: Qt.callLater(root.fitCurrent)
 }

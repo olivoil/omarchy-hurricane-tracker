@@ -22,6 +22,13 @@ monitor and avoids startup notification floods.
 active, forwards settings to the shared service, and opens the overlay through
 the shell's normal plugin IPC route.
 
+`Omanado.qml` treats a selected system, a regional overview, and the globe as
+distinct semantic views. Opening a region clears the system selection so the
+summary, forecast layers, timeline, and discussion cannot describe an off-map
+cyclone. The most recent semantic view is stored with the plugin's inline shell
+settings and restored on the next summon. If a remembered system disappears,
+the overlay falls back to that system's region rather than another basin.
+
 ## Data boundary
 
 `bin/omanado-data` is a Python standard-library helper. It:

@@ -36,7 +36,10 @@
       "refreshMinutes": 15,
       "alertRegion": "Off",
       "formationThreshold": "Medium (40%)",
-      "notifyNamedStorms": true
+      "notifyNamedStorms": true,
+      "lastViewKind": "initial",
+      "lastViewRegion": "",
+      "lastSelectedKey": ""
     },
     "schema": [
       {

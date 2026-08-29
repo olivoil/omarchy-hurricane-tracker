@@ -18,6 +18,7 @@ does not currently include storms tracked by the JTWC or other agencies.
 - Forecast intensity shown with both labels and color
 - Excerpts from the latest NHC discussions, with links to the full advisories
 - Optional notifications for new cyclones and rising formation chances
+- Restores the last system, region, or globe view when reopened
 - Keyboard navigation, map controls, and support for reduced motion
 - Cached data when the NHC is temporarily unavailable
 
@@ -59,13 +60,13 @@ you will not get a burst of notifications for storms already underway.
 | Middle-click the bar icon | Refresh NHC data |
 | Right-click the bar icon | Open the NHC website |
 | Click a system or map marker | Select it and fit it on the map |
-| Click a basin heading | Expand or collapse it; expanding also fits it on the map |
-| Click **View all** | Fit every system in the expanded basin on the map |
+| Click a basin heading | Open its regional overview, clear any system selection, and fit it on the map; click again to collapse it |
+| Click **View all** | Return to the expanded basin's regional overview |
 | Drag the map | Move around the globe |
 | Mouse wheel | Zoom at the pointer |
 | Up / Down | Select the previous or next system |
 | `+` / `-` | Zoom in or out |
-| `F` | Fit the selected system |
+| `F` | Fit the current system or region |
 | `G` or `0` | Show the whole globe |
 | `R` | Refresh |
 | `O` | Open the selected system's official advisory |

@@ -25,6 +25,11 @@ class PluginContractTests(unittest.TestCase):
         self.assertEqual(defaults["alertRegion"], "Off")
         self.assertEqual(defaults["formationThreshold"], "Medium (40%)")
         self.assertTrue(defaults["notifyNamedStorms"])
+        self.assertEqual(defaults["lastViewKind"], "initial")
+        self.assertEqual(defaults["lastViewRegion"], "")
+        self.assertEqual(defaults["lastSelectedKey"], "")
+        schema_keys = {field["key"] for field in manifest["barWidget"]["schema"]}
+        self.assertTrue({"lastViewKind", "lastViewRegion", "lastSelectedKey"}.isdisjoint(schema_keys))
         self.assertTrue((ROOT / "assets" / "hurricane-tracker.svg").is_file())
         self.assertTrue((ROOT / "preview.png").is_file())
 

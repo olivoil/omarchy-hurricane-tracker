@@ -13,9 +13,12 @@ BarWidget {
   readonly property int activeCount: tracker ? tracker.activeCount : 0
   readonly property int trackingCount: tracker ? tracker.trackingCount : 0
   readonly property var strongestStorm: activeCount > 0 ? tracker.storms[0] : null
+  property bool hostSettingsReady: false
 
   function syncService() {
-    if (root.tracker && "settings" in root.tracker) root.tracker.settings = root.settings
+    if (!root.hostSettingsReady || !root.tracker || !("settings" in root.tracker)) return
+    root.tracker.settings = root.settings
+    if ("settingsInjected" in root.tracker) root.tracker.settingsInjected = true
   }
 
   function refresh() {
@@ -30,7 +33,15 @@ BarWidget {
   }
 
   onTrackerChanged: syncService()
-  onSettingsChanged: syncService()
+  onSettingsChanged: {
+    hostSettingsReady = true
+    syncService()
+  }
+
+  Component.onCompleted: Qt.callLater(function() {
+    root.hostSettingsReady = true
+    root.syncService()
+  })
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

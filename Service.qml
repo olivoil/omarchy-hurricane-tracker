@@ -8,6 +8,7 @@ Item {
   // Injected by the Omarchy shell.
   property var shell: null
   property var settings: ({})
+  property bool settingsInjected: false
 
   property var payload: ({
     schemaVersion: 2,
@@ -50,7 +51,7 @@ Item {
   readonly property int trackingCount: activeCount + outlookCount
   readonly property int refreshMinutes: Math.max(5, Math.min(60, Number(setting("refreshMinutes", 15)) || 15))
   readonly property int retryMultiplier: Math.min(4, Math.pow(2, Math.min(consecutiveFailures, 2)))
-  readonly property bool settingsReady: settings && Object.keys(settings).length > 0
+  readonly property bool settingsReady: settingsInjected
   readonly property string alertRegion: settingsReady ? String(setting("alertRegion", "Off")) : "Off"
   readonly property string formationThreshold: String(setting("formationThreshold", "Medium (40%)"))
   readonly property bool notifyNamedStorms: setting("notifyNamedStorms", true) === true

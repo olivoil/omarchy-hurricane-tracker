@@ -84,6 +84,48 @@ assert.deepEqual(Array.from(systems, item => item.key), ["storm:al012026", "outl
 assert.equal(model.selectedKeyAfterRefresh(systems, "outlook:al-outlook-1"), "outlook:al-outlook-1")
 assert.equal(model.selectedKeyAfterRefresh(systems, "missing"), "storm:al012026")
 
+const easternPacificStorm = { ...storm, id: "ep012026", basin: "ep", name: "Karina" }
+const regionalSystems = model.orderedSystems([storm, easternPacificStorm], [outlook])
+let viewState = model.viewStateAfterRefresh(regionalSystems, "initial", "", "", true)
+assert.equal(viewState.kind, "system")
+assert.equal(viewState.region, "al")
+assert.equal(viewState.selectedKey, "storm:al012026")
+
+viewState = model.viewStateAfterRefresh(regionalSystems, "region", "al", "storm:ep012026", true)
+assert.equal(viewState.kind, "region")
+assert.equal(viewState.region, "al")
+assert.equal(viewState.selectedKey, "")
+
+viewState = model.viewStateAfterRefresh(regionalSystems, "system", "ep", "storm:ep012026", true)
+assert.equal(viewState.kind, "system")
+assert.equal(viewState.region, "ep")
+assert.equal(viewState.selectedKey, "storm:ep012026")
+
+viewState = model.viewStateAfterRefresh(regionalSystems, "system", "ep", "storm:missing", true)
+assert.equal(viewState.kind, "region")
+assert.equal(viewState.region, "ep")
+assert.equal(viewState.selectedKey, "")
+
+viewState = model.viewStateAfterRefresh([], "system", "ep", "storm:ep012026", false)
+assert.equal(viewState.kind, "system")
+assert.equal(viewState.region, "ep")
+assert.equal(viewState.selectedKey, "storm:ep012026")
+
+viewState = model.viewStateAfterRefresh(systems, "system", "ep", "storm:ep012026", false)
+assert.equal(viewState.kind, "system")
+assert.equal(viewState.region, "ep")
+assert.equal(viewState.selectedKey, "storm:ep012026")
+
+viewState = model.viewStateAfterRefresh(regionalSystems, "globe", "ep", "storm:ep012026", true)
+assert.equal(viewState.kind, "globe")
+assert.equal(viewState.region, "ep")
+assert.equal(viewState.selectedKey, "storm:ep012026")
+
+viewState = model.viewStateAfterRefresh([], "globe", "ep", "storm:ep012026", false)
+assert.equal(viewState.kind, "globe")
+assert.equal(viewState.region, "ep")
+assert.equal(viewState.selectedKey, "storm:ep012026")
+
 const regionRows = model.regionalRows([storm], [outlook])
 assert.equal(regionRows[0].kind, "region")
 assert.equal(regionRows[0].name, "Atlantic")

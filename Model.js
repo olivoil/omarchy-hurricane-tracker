@@ -212,6 +212,69 @@ function selectedKeyAfterRefresh(systems, selectedKey) {
   return selected ? selected.key : (systems.length > 0 ? systems[0].key : "")
 }
 
+function normalizedRegion(basin) {
+  var value = String(basin || "")
+  return value === "al" || value === "ep" || value === "cp" ? value : ""
+}
+
+function normalizedViewKind(kind) {
+  var value = String(kind || "")
+  return value === "system" || value === "region" || value === "globe" ? value : "initial"
+}
+
+function viewStateAfterRefresh(systems, viewKind, viewRegion, selectedKey, dataReady) {
+  var rows = Array.isArray(systems) ? systems : []
+  var kind = normalizedViewKind(viewKind)
+  var region = normalizedRegion(viewRegion)
+  var key = String(selectedKey || "")
+  var selected = systemByKey(rows, key)
+
+  if (kind === "region" && region !== "") {
+    return { kind: "region", region: region, selectedKey: "" }
+  }
+
+  if (kind === "globe") {
+    return {
+      kind: "globe",
+      region: selected ? normalizedRegion(selected.basin) : region,
+      selectedKey: selected ? selected.key : (key !== "" && dataReady !== true ? key : "")
+    }
+  }
+
+  if (kind === "system") {
+    if (selected) {
+      return {
+        kind: "system",
+        region: normalizedRegion(selected.basin),
+        selectedKey: selected.key
+      }
+    }
+    // Keep an explicitly requested system pending until the first payload has
+    // arrived. Once data is authoritative, a vanished system degrades to its
+    // regional overview instead of jumping to an unrelated basin.
+    if (key !== "" && dataReady !== true) {
+      return { kind: "system", region: region, selectedKey: key }
+    }
+    if (region !== "") return { kind: "region", region: region, selectedKey: "" }
+  }
+
+  if (selected) {
+    return {
+      kind: "system",
+      region: normalizedRegion(selected.basin),
+      selectedKey: selected.key
+    }
+  }
+  if (rows.length > 0) {
+    return {
+      kind: "system",
+      region: normalizedRegion(rows[0].basin),
+      selectedKey: rows[0].key
+    }
+  }
+  return { kind: "initial", region: region, selectedKey: "" }
+}
+
 function systemBounds(system) {
   if (systemKind(system) === "outlook") {
     return boundsForCoordinates(
