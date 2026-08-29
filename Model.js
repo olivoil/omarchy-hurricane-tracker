@@ -275,6 +275,19 @@ function viewStateAfterRefresh(systems, viewKind, viewRegion, selectedKey, dataR
   return { kind: "initial", region: region, selectedKey: "" }
 }
 
+function expandedRegionAfterViewSync(expandedRegion, previousKind, previousRegion, nextKind, nextRegion) {
+  var current = normalizedRegion(expandedRegion)
+  var beforeKind = normalizedViewKind(previousKind)
+  var beforeRegion = normalizedRegion(previousRegion)
+  var afterKind = normalizedViewKind(nextKind)
+  var afterRegion = normalizedRegion(nextRegion)
+  var contextChanged = beforeKind !== afterKind || beforeRegion !== afterRegion
+
+  if (contextChanged && (afterKind === "region" || afterKind === "system") && afterRegion !== "")
+    return afterRegion
+  return current
+}
+
 function systemBounds(system) {
   if (systemKind(system) === "outlook") {
     return boundsForCoordinates(

@@ -161,12 +161,13 @@ Item {
     var previousKey = selectedKey
     var next = Model.viewStateAfterRefresh(
       systems, viewKind, viewBasin, selectedKey, tracker && tracker.hasLoaded)
+    var nextExpandedRegion = Model.expandedRegionAfterViewSync(
+      expandedRegion, previousKind, previousBasin, next.kind, next.region)
 
     viewKind = next.kind
     viewBasin = next.region
     selectedKey = next.selectedKey
-    if ((viewKind === "region" || viewKind === "system") && viewBasin !== "")
-      expandedRegion = viewBasin
+    expandedRegion = nextExpandedRegion
 
     var changed = previousKind !== viewKind || previousBasin !== viewBasin
       || previousKey !== selectedKey

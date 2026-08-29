@@ -126,6 +126,10 @@ assert.equal(viewState.kind, "globe")
 assert.equal(viewState.region, "ep")
 assert.equal(viewState.selectedKey, "storm:ep012026")
 
+assert.equal(model.expandedRegionAfterViewSync("", "region", "al", "region", "al"), "")
+assert.equal(model.expandedRegionAfterViewSync("", "system", "ep", "region", "ep"), "ep")
+assert.equal(model.expandedRegionAfterViewSync("al", "region", "al", "region", "cp"), "cp")
+
 const regionRows = model.regionalRows([storm], [outlook])
 assert.equal(regionRows[0].kind, "region")
 assert.equal(regionRows[0].name, "Atlantic")
