@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<kml xmlns="http://earth.google.com/kml/2.1">
+  <Document>
+    <name>Graphical Tropical Weather Outlook - North Atlantic basin - Fri Aug 28 23:39:08 2026</name>
+    <Placemark>
+      <styleUrl>#1</styleUrl>
+      <Polygon>
+        <outerBoundaryIs><LinearRing><coordinates>
+          -67,19,0 -78,22,0 -75,27,0 -65,24,0 -67,19,0
+        </coordinates></LinearRing></outerBoundaryIs>
+      </Polygon>
+      <ExtendedData>
+        <Data name="Disturbance"><value>1</value></Data>
+        <Data name="2day_percentage"><value>0%</value></Data>
+        <Data name="2day_category"><value>Low</value></Data>
+        <Data name="7day_percentage"><value>10%</value></Data>
+        <Data name="7day_category"><value>Low</value></Data>
+        <Data name="Discussion"><value>1. East of the Leeward Islands (Remnants of Dolly): A tropical wave, the remnants of Tropical Storm Dolly, is moving westward. Formation chance through 48 hours...low...near 0 percent. Formation chance through 7 days...low...10 percent.</value></Data>
+      </ExtendedData>
+    </Placemark>
+    <Placemark>
+      <styleUrl>#lowx</styleUrl>
+      <Point><coordinates>-51.4,16.2,0</coordinates></Point>
+      <ExtendedData>
+        <Data name="Disturbance"><value>1</value></Data>
+        <Data name="2day_percentage"><value>0%</value></Data>
+        <Data name="2day_category"><value>Low</value></Data>
+        <Data name="7day_percentage"><value>10%</value></Data>
+        <Data name="7day_category"><value>Low</value></Data>
+        <Data name="Discussion"><value>1. East of the Leeward Islands (Remnants of Dolly): A tropical wave, the remnants of Tropical Storm Dolly, is moving westward. Formation chance through 48 hours...low...near 0 percent. Formation chance through 7 days...low...10 percent.</value></Data>
+      </ExtendedData>
+    </Placemark>
+  </Document>
+</kml>

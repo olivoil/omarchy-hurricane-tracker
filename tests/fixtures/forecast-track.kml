@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <description><![CDATA[
+        <table><tr><td>Advisory Information</td></tr>
+        <tr><td>Valid at: 11:00 AM EDT August 28, 2026 </td></tr>
+        <tr><td>Maximum Wind: 90 knots (105 mph)</td></tr>
+        <tr><td>Wind Gusts: 110 knots (125 mph)</td></tr></table>
+      ]]></description>
+      <styleUrl>#initial_point</styleUrl>
+      <Point><coordinates>-73.1,22.4,0</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <description><![CDATA[
+        <table><tr><td>24 hr Forecast</td></tr>
+        <tr><td>Valid at: 11:00 AM EDT August 29, 2026 </td></tr>
+        <tr><td>Maximum Wind: 100 knots (115 mph)</td></tr>
+        <tr><td>Wind Gusts: 120 knots (140 mph)</td></tr></table>
+      ]]></description>
+      <styleUrl>#m_point</styleUrl>
+      <Point><coordinates>-75.5,24.0,0</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <description><![CDATA[
+        <table><tr><td>48 hr Forecast</td></tr>
+        <tr><td>Valid at: 11:00 AM EDT August 30, 2026 </td></tr>
+        <tr><td>Maximum Wind: 85 knots (100 mph)</td></tr>
+        <tr><td>Wind Gusts: 105 knots (120 mph)</td></tr></table>
+      ]]></description>
+      <styleUrl>#h_point</styleUrl>
+      <Point><coordinates>-77.2,26.8,0</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>

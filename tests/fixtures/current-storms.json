@@ -1,0 +1,38 @@
+{
+  "activeStorms": [
+    {
+      "id": "al012026",
+      "binNumber": "AT1",
+      "name": "Ada",
+      "classification": "HU",
+      "intensity": "90",
+      "pressure": "968",
+      "latitude": "22.4N",
+      "longitude": "73.1W",
+      "latitudeNumeric": 22.4,
+      "longitudeNumeric": -73.1,
+      "movementDir": 300,
+      "movementSpeed": 12,
+      "lastUpdate": "2026-08-28T15:00:00.000Z",
+      "publicAdvisory": {
+        "advNum": "014",
+        "url": "https://www.nhc.noaa.gov/text/MIATCPAT1.shtml"
+      },
+      "forecastDiscussion": {
+        "url": "https://www.nhc.noaa.gov/text/MIATCDAT1.shtml"
+      },
+      "forecastGraphics": {
+        "url": "https://www.nhc.noaa.gov/graphics_at1.shtml"
+      },
+      "forecastTrack": {
+        "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/ADA_TRACK.kmz"
+      },
+      "trackCone": {
+        "kmzFile": "https://www.nhc.noaa.gov/storm_graphics/api/ADA_CONE.kmz"
+      },
+      "bestTrackGIS": {
+        "kmzFile": "https://www.nhc.noaa.gov/gis/best_track/ada_best_track.kmz"
+      }
+    }
+  ]
+}

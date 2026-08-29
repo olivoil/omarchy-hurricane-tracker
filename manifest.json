@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.olivoil.omanado",
+  "name": "Omanado",
+  "version": "0.2.0",
+  "author": "Olivier Melcher",
+  "license": "MIT",
+  "description": "A calm, native Omarchy tracker for NHC cyclones, regional outlooks, forecast tracks, and discussions.",
+  "homepage": "https://github.com/olivoil/omanado",
+  "repository": "https://github.com/olivoil/omanado",
+  "keywords": [
+    "hurricane",
+    "weather",
+    "storm",
+    "noaa",
+    "map"
+  ],
+  "kinds": [
+    "service",
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "overlay": "Omanado.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omanado",
+    "description": "Active NHC storms and forecast tracks",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "refreshMinutes": 15,
+      "alertRegion": "Off",
+      "formationThreshold": "Medium (40%)",
+      "notifyNamedStorms": true
+    },
+    "schema": [
+      {
+        "key": "refreshMinutes",
+        "type": "integer",
+        "label": "Refresh interval (minutes)",
+        "min": 5,
+        "max": 60,
+        "step": 5,
+        "defaultValue": 15,
+        "description": "How often Omanado checks the National Hurricane Center for updates."
+      },
+      {
+        "key": "alertRegion",
+        "type": "enum",
+        "label": "Regional alerts",
+        "options": ["Off", "Atlantic", "Eastern Pacific", "Central Pacific", "All NHC basins"],
+        "defaultValue": "Off",
+        "description": "Notify when an NHC outlook reaches your threshold in this region. Existing systems are used as a quiet baseline when alerts are enabled."
+      },
+      {
+        "key": "formationThreshold",
+        "type": "enum",
+        "label": "Formation threshold",
+        "options": ["Low (20%)", "Medium (40%)", "High (70%)"],
+        "defaultValue": "Medium (40%)",
+        "description": "Minimum seven-day tropical cyclone formation chance for a developing-system notification."
+      },
+      {
+        "key": "notifyNamedStorms",
+        "type": "boolean",
+        "label": "Named storm alerts",
+        "defaultValue": true,
+        "description": "Also notify when NHC begins advisories for a new tropical cyclone in the selected region."
+      }
+    ]
+  }
+}

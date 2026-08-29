@@ -1,0 +1,521 @@
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, Number(value)))
+}
+
+function wrapLongitude(value) {
+  var wrapped = (Number(value) + 180) % 360
+  if (wrapped < 0) wrapped += 360
+  return wrapped - 180
+}
+
+function longitudeNear(reference, value) {
+  var longitude = Number(value)
+  var centre = Number(reference)
+  while (longitude - centre > 180) longitude -= 360
+  while (longitude - centre < -180) longitude += 360
+  return longitude
+}
+
+function validCoordinate(latitude, longitude) {
+  var lat = Number(latitude)
+  var lon = Number(longitude)
+  return isFinite(lat) && isFinite(lon)
+    && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+}
+
+function pushCoordinate(output, item) {
+  if (!item || !validCoordinate(item.latitude, item.longitude)) return
+  output.push({ latitude: Number(item.latitude), longitude: Number(item.longitude) })
+}
+
+function outlookCoordinates(outlook) {
+  var output = []
+  if (!outlook) return output
+  pushCoordinate(output, outlook)
+  var rings = Array.isArray(outlook.area) ? outlook.area : []
+  for (var r = 0; r < rings.length; r++) {
+    var ring = Array.isArray(rings[r]) ? rings[r] : []
+    for (var p = 0; p < ring.length; p++) {
+      if (!Array.isArray(ring[p]) || ring[p].length < 2) continue
+      pushCoordinate(output, { longitude: ring[p][0], latitude: ring[p][1] })
+    }
+  }
+  return output
+}
+
+function stormCoordinates(storm) {
+  var output = []
+  if (!storm) return output
+  pushCoordinate(output, storm)
+
+  var groups = [storm.track, storm.pastTrack]
+  for (var g = 0; g < groups.length; g++) {
+    var rows = Array.isArray(groups[g]) ? groups[g] : []
+    for (var i = 0; i < rows.length; i++) pushCoordinate(output, rows[i])
+  }
+
+  var rings = Array.isArray(storm.cone) ? storm.cone : []
+  for (var r = 0; r < rings.length; r++) {
+    var ring = Array.isArray(rings[r]) ? rings[r] : []
+    for (var p = 0; p < ring.length; p++) {
+      if (!Array.isArray(ring[p]) || ring[p].length < 2) continue
+      pushCoordinate(output, { longitude: ring[p][0], latitude: ring[p][1] })
+    }
+  }
+  return output
+}
+
+function stormBounds(storm) {
+  var coordinates = stormCoordinates(storm)
+  var reference = storm && validCoordinate(storm.latitude, storm.longitude)
+    ? Number(storm.longitude) : 0
+  if (coordinates.length === 0) {
+    return { centreLatitude: 18, centreLongitude: -70, latitudeSpan: 42, longitudeSpan: 82 }
+  }
+
+  var minimumLatitude = 90
+  var maximumLatitude = -90
+  var minimumLongitude = reference
+  var maximumLongitude = reference
+  for (var i = 0; i < coordinates.length; i++) {
+    var latitude = coordinates[i].latitude
+    var longitude = longitudeNear(reference, coordinates[i].longitude)
+    minimumLatitude = Math.min(minimumLatitude, latitude)
+    maximumLatitude = Math.max(maximumLatitude, latitude)
+    minimumLongitude = Math.min(minimumLongitude, longitude)
+    maximumLongitude = Math.max(maximumLongitude, longitude)
+  }
+
+  var latitudeSpan = Math.max(8, maximumLatitude - minimumLatitude)
+  var longitudeSpan = Math.max(12, maximumLongitude - minimumLongitude)
+  return {
+    centreLatitude: clamp((minimumLatitude + maximumLatitude) / 2, -70, 70),
+    centreLongitude: wrapLongitude((minimumLongitude + maximumLongitude) / 2),
+    latitudeSpan: Math.min(150, latitudeSpan),
+    longitudeSpan: Math.min(320, longitudeSpan)
+  }
+}
+
+function boundsForCoordinates(coordinates, referenceLongitude, fallback) {
+  var rows = Array.isArray(coordinates) ? coordinates : []
+  var reference = isFinite(Number(referenceLongitude)) ? Number(referenceLongitude) : 0
+  if (rows.length === 0) return fallback
+  var minimumLatitude = 90
+  var maximumLatitude = -90
+  var minimumLongitude = reference
+  var maximumLongitude = reference
+  for (var i = 0; i < rows.length; i++) {
+    var latitude = Number(rows[i].latitude)
+    var longitude = longitudeNear(reference, rows[i].longitude)
+    minimumLatitude = Math.min(minimumLatitude, latitude)
+    maximumLatitude = Math.max(maximumLatitude, latitude)
+    minimumLongitude = Math.min(minimumLongitude, longitude)
+    maximumLongitude = Math.max(maximumLongitude, longitude)
+  }
+  return {
+    centreLatitude: clamp((minimumLatitude + maximumLatitude) / 2, -70, 70),
+    centreLongitude: wrapLongitude((minimumLongitude + maximumLongitude) / 2),
+    latitudeSpan: Math.min(150, Math.max(8, maximumLatitude - minimumLatitude)),
+    longitudeSpan: Math.min(320, Math.max(12, maximumLongitude - minimumLongitude))
+  }
+}
+
+function systemKind(system) {
+  if (!system) return ""
+  if (String(system.kind || "") === "outlook" || system.sevenDayChance !== undefined) return "outlook"
+  return "storm"
+}
+
+function systemCoordinates(system) {
+  return systemKind(system) === "outlook" ? outlookCoordinates(system) : stormCoordinates(system)
+}
+
+function systemKey(system) {
+  if (!system) return ""
+  return systemKind(system) + ":" + String(system.id || "")
+}
+
+function copySystem(system, kind) {
+  var output = {}
+  if (system) for (var key in system) output[key] = system[key]
+  output.kind = kind
+  output.key = kind + ":" + String(system && system.id || "")
+  return output
+}
+
+function orderedSystems(storms, outlooks) {
+  var active = Array.isArray(storms) ? storms : []
+  var developing = Array.isArray(outlooks) ? outlooks : []
+  var output = []
+  var basins = ["al", "ep", "cp"]
+  for (var b = 0; b < basins.length; b++) {
+    for (var s = 0; s < active.length; s++) {
+      if (String(active[s] && active[s].basin || "") === basins[b]) output.push(copySystem(active[s], "storm"))
+    }
+    for (var o = 0; o < developing.length; o++) {
+      if (String(developing[o] && developing[o].basin || "") === basins[b]) output.push(copySystem(developing[o], "outlook"))
+    }
+  }
+  return output
+}
+
+function regionName(basin) {
+  if (basin === "al") return "Atlantic"
+  if (basin === "ep") return "Eastern Pacific"
+  if (basin === "cp") return "Central Pacific"
+  return String(basin || "Region").toUpperCase()
+}
+
+function regionalRows(storms, outlooks) {
+  var systems = orderedSystems(storms, outlooks)
+  var rows = []
+  var basins = ["al", "ep", "cp"]
+  for (var b = 0; b < basins.length; b++) {
+    var basin = basins[b]
+    var activeCount = 0
+    var outlookCount = 0
+    for (var c = 0; c < systems.length; c++) {
+      if (systems[c].basin !== basin) continue
+      if (systems[c].kind === "storm") activeCount++
+      else outlookCount++
+    }
+    rows.push({ kind: "region", basin: basin, name: regionName(basin), activeCount: activeCount, outlookCount: outlookCount })
+    var added = 0
+    for (var i = 0; i < systems.length; i++) {
+      if (systems[i].basin !== basin) continue
+      rows.push({ kind: "system", basin: basin, key: systems[i].key, system: systems[i] })
+      added++
+    }
+    if (added === 0) rows.push({ kind: "empty", basin: basin, name: regionName(basin) })
+  }
+  return rows
+}
+
+function systemByKey(systems, key) {
+  var rows = Array.isArray(systems) ? systems : []
+  for (var i = 0; i < rows.length; i++) if (rows[i].key === String(key || "")) return rows[i]
+  return null
+}
+
+function selectedKeyAfterRefresh(systems, selectedKey) {
+  var selected = systemByKey(systems, selectedKey)
+  return selected ? selected.key : (systems.length > 0 ? systems[0].key : "")
+}
+
+function systemBounds(system) {
+  if (systemKind(system) === "outlook") {
+    return boundsForCoordinates(
+      outlookCoordinates(system),
+      system && system.longitude,
+      { centreLatitude: 18, centreLongitude: -70, latitudeSpan: 30, longitudeSpan: 55 }
+    )
+  }
+  return stormBounds(system)
+}
+
+function regionBounds(storms, outlooks, basin) {
+  var systems = orderedSystems(storms, outlooks)
+  var coordinates = []
+  var defaults = {
+    al: { centreLatitude: 20, centreLongitude: -62, latitudeSpan: 52, longitudeSpan: 112 },
+    ep: { centreLatitude: 15, centreLongitude: -115, latitudeSpan: 48, longitudeSpan: 94 },
+    cp: { centreLatitude: 18, centreLongitude: -158, latitudeSpan: 46, longitudeSpan: 78 }
+  }
+  var fallback = defaults[basin] || { centreLatitude: 12, centreLongitude: -110, latitudeSpan: 110, longitudeSpan: 250 }
+  for (var i = 0; i < systems.length; i++) {
+    if (systems[i].basin !== basin) continue
+    var next = systemCoordinates(systems[i])
+    for (var p = 0; p < next.length; p++) coordinates.push(next[p])
+  }
+  var bounds = boundsForCoordinates(coordinates, fallback.centreLongitude, fallback)
+  bounds.latitudeSpan = Math.max(32, bounds.latitudeSpan)
+  bounds.longitudeSpan = Math.max(58, bounds.longitudeSpan)
+  return bounds
+}
+
+function regionCoordinates(storms, outlooks, basin) {
+  var systems = orderedSystems(storms, outlooks)
+  var coordinates = []
+  for (var i = 0; i < systems.length; i++) {
+    if (systems[i].basin !== basin) continue
+    var next = systemCoordinates(systems[i])
+    for (var p = 0; p < next.length; p++) coordinates.push(next[p])
+  }
+  return coordinates
+}
+
+function orthographicPoint(latitude, longitude, centreLatitude, centreLongitude) {
+  var radians = Math.PI / 180
+  var phi = Number(latitude) * radians
+  var phi0 = Number(centreLatitude) * radians
+  var delta = longitudeNear(Number(centreLongitude), longitude) * radians - Number(centreLongitude) * radians
+  var cosPhi = Math.cos(phi)
+  return {
+    x: cosPhi * Math.sin(delta),
+    y: Math.cos(phi0) * Math.sin(phi) - Math.sin(phi0) * cosPhi * Math.cos(delta),
+    z: Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * cosPhi * Math.cos(delta)
+  }
+}
+
+function orthographicFit(coordinates, bounds) {
+  var view = bounds || { centreLatitude: 0, centreLongitude: 0, latitudeSpan: 30, longitudeSpan: 60 }
+  var rows = Array.isArray(coordinates) ? coordinates : []
+  var maximumEast = 0
+  var maximumNorth = 0
+  var minimumDepth = 1
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || !validCoordinate(rows[i].latitude, rows[i].longitude)) continue
+    var point = orthographicPoint(
+      rows[i].latitude,
+      rows[i].longitude,
+      view.centreLatitude,
+      view.centreLongitude
+    )
+    maximumEast = Math.max(maximumEast, Math.abs(point.x))
+    maximumNorth = Math.max(maximumNorth, Math.abs(point.y))
+    minimumDepth = Math.min(minimumDepth, point.z)
+  }
+
+  // Bounds have deliberate minimum spans so a point-only advisory still gets
+  // enough geographic context. Preserve those floors in spherical space.
+  var radians = Math.PI / 180
+  var halfLatitude = Math.min(89, Math.max(1, Number(view.latitudeSpan || 0) / 2)) * radians
+  var halfLongitude = Math.min(89, Math.max(1, Number(view.longitudeSpan || 0) / 2)) * radians
+  var latitudeScale = Math.max(0.24, Math.cos(Number(view.centreLatitude || 0) * radians))
+  maximumEast = Math.max(maximumEast, Math.sin(halfLongitude) * latitudeScale)
+  maximumNorth = Math.max(maximumNorth, Math.sin(halfLatitude))
+
+  return {
+    centreLatitude: Number(view.centreLatitude || 0),
+    centreLongitude: wrapLongitude(view.centreLongitude || 0),
+    horizontalExtent: Math.max(0.025, maximumEast),
+    verticalExtent: Math.max(0.025, maximumNorth),
+    minimumDepth: minimumDepth
+  }
+}
+
+function inverseOrthographic(x, y, centreLatitude, centreLongitude) {
+  var rho = Math.hypot(Number(x), Number(y))
+  if (!isFinite(rho) || rho > 1.000001) return null
+  if (rho < 0.000001) return { latitude: Number(centreLatitude), longitude: wrapLongitude(centreLongitude) }
+  var radians = Math.PI / 180
+  var phi0 = Number(centreLatitude) * radians
+  var c = Math.asin(Math.min(1, rho))
+  var sinC = Math.sin(c)
+  var cosC = Math.cos(c)
+  var latitude = Math.asin(cosC * Math.sin(phi0) + Number(y) * sinC * Math.cos(phi0) / rho)
+  var longitude = Number(centreLongitude) * radians + Math.atan2(
+    Number(x) * sinC,
+    rho * Math.cos(phi0) * cosC - Number(y) * Math.sin(phi0) * sinC
+  )
+  return { latitude: latitude / radians, longitude: wrapLongitude(longitude / radians) }
+}
+
+function classificationLabel(storm) {
+  if (!storm) return "Tropical cyclone"
+  if (Number(storm.category) > 0) return "Category " + Number(storm.category) + " hurricane"
+  return String(storm.classificationLabel || storm.intensityLabel || "Tropical cyclone")
+}
+
+function severityCode(storm) {
+  if (!storm) return "TC"
+  var category = Number(storm.category || 0)
+  if (category > 0) return String(category)
+  var code = String(storm.classification || "TC").toUpperCase()
+  if (code === "TS" || code === "STS") return "TS"
+  if (code === "TD" || code === "STD" || code === "SD") return "TD"
+  if (code === "PC") return "PC"
+  if (code === "PTC" || code === "EX") return "PT"
+  return "TC"
+}
+
+// Palette authored in OKLCH, stored as sRGB hex because Qt's QML color
+// parser does not accept CSS Color 4 syntax. Hue moves from ocean teal through
+// amber and coral to plum as wind severity rises.
+function severityColor(value) {
+  var category = typeof value === "object" ? Number(value && value.category || 0) : Number(value || 0)
+  var classification = typeof value === "object" ? String(value && value.classification || "") : ""
+  if (category >= 5) return "#b24582"
+  if (category === 4) return "#d84e68"
+  if (category === 3) return "#ed6c58"
+  if (category === 2) return "#ee9858"
+  if (category === 1) return "#e9be62"
+  if (classification === "TS" || classification === "STS") return "#45c6b5"
+  if (classification === "TD" || classification === "STD" || classification === "SD") return "#62abc0"
+  return "#89aab1"
+}
+
+function outlookColor(outlook) {
+  var chance = Number(outlook && outlook.sevenDayChance || 0)
+  if (chance >= 70) return "#ed6c58"
+  if (chance >= 40) return "#e9be62"
+  return "#62abc0"
+}
+
+function outlookChanceLabel(outlook) {
+  var twoDay = Math.max(0, Math.round(Number(outlook && outlook.twoDayChance || 0)))
+  var sevenDay = Math.max(0, Math.round(Number(outlook && outlook.sevenDayChance || 0)))
+  return twoDay + "% in 2 days · " + sevenDay + "% in 7 days"
+}
+
+function systemClassificationLabel(system) {
+  if (systemKind(system) === "outlook") return String(system.classificationLabel || "Developing system")
+  return classificationLabel(system)
+}
+
+function systemMetric(system) {
+  return systemKind(system) === "outlook" ? outlookChanceLabel(system) : formatWind(system)
+}
+
+function discussionExcerpt(system) {
+  return String(system && system.discussionExcerpt || "")
+}
+
+function formatWind(storm) {
+  var mph = Math.max(0, Math.round(Number(storm && storm.windMph || 0)))
+  return mph > 0 ? mph + " mph" : "Wind unavailable"
+}
+
+function formatPressure(storm) {
+  var pressure = Math.max(0, Math.round(Number(storm && storm.pressureMb || 0)))
+  return pressure > 0 ? pressure + " mb" : "Pressure unavailable"
+}
+
+function formatMovement(storm) {
+  if (!storm) return "Movement unavailable"
+  var direction = String(storm.movementDirectionLabel || "")
+  var speed = Math.max(0, Math.round(Number(storm.movementSpeedMph || 0)))
+  if (direction && speed) return direction + " at " + speed + " mph"
+  if (direction) return direction
+  return "Movement unavailable"
+}
+
+function humanAge(iso, nowMilliseconds) {
+  var then = Date.parse(String(iso || ""))
+  if (!isFinite(then)) return "time unavailable"
+  var now = nowMilliseconds === undefined ? Date.now() : Number(nowMilliseconds)
+  var minutes = Math.max(0, Math.round((now - then) / 60000))
+  if (minutes < 2) return "just now"
+  if (minutes < 60) return minutes + " min ago"
+  var hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours + "h ago"
+  var days = Math.floor(hours / 24)
+  return days + (days === 1 ? " day ago" : " days ago")
+}
+
+function advisoryLabel(storm, nowMilliseconds) {
+  if (!storm) return "NHC advisory"
+  var number = String(storm.advisoryNumber || "").replace(/^0+/, "")
+  var prefix = number ? "Advisory " + number : "NHC advisory"
+  return prefix + " · " + humanAge(storm.updatedAt, nowMilliseconds)
+}
+
+function forecastHourLabel(point) {
+  var hour = Math.max(0, Math.round(Number(point && point.forecastHour || 0)))
+  return hour === 0 ? "Now" : "+" + hour + "h"
+}
+
+function forecastTimeLabel(point) {
+  var value = String(point && point.validTimeLabel || "")
+  var match = value.match(/(\d{1,2}:\d{2}\s+[AP]M)\s+([A-Z]{2,5})\s+([A-Za-z]+)\s+(\d{1,2})/i)
+  if (!match) return value || "Forecast time unavailable"
+  return match[3].slice(0, 3) + " " + match[4] + " · " + match[1] + " " + match[2]
+}
+
+function safeOfficialUrl(value) {
+  var url = String(value || "")
+  if (url.length === 0 || url.length > 2048 || /^https:\/\//.test(url) === false) return ""
+  var rest = url.slice(8)
+  var slash = rest.indexOf("/")
+  var host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase()
+  if (host.indexOf("@") !== -1 || host.indexOf(":") !== -1) return ""
+  return ["nhc.noaa.gov", "www.nhc.noaa.gov", "hurricanes.gov", "www.hurricanes.gov"].indexOf(host) !== -1 ? url : ""
+}
+
+function activeSummary(storms) {
+  var rows = Array.isArray(storms) ? storms : []
+  if (rows.length === 0) return "No active NHC cyclones"
+  var names = []
+  for (var i = 0; i < Math.min(rows.length, 3); i++) names.push(String(rows[i].name || "Unnamed"))
+  var remainder = rows.length > 3 ? " +" + (rows.length - 3) : ""
+  return rows.length + (rows.length === 1 ? " active cyclone: " : " active cyclones: ") + names.join(", ") + remainder
+}
+
+function trackingSummary(storms, outlooks) {
+  var active = Array.isArray(storms) ? storms : []
+  var developing = Array.isArray(outlooks) ? outlooks : []
+  if (active.length === 0 && developing.length === 0) return "No NHC tropical systems"
+  var parts = []
+  if (active.length > 0) parts.push(active.length + (active.length === 1 ? " active cyclone" : " active cyclones"))
+  if (developing.length > 0) parts.push(developing.length + (developing.length === 1 ? " outlook area" : " outlook areas"))
+  return parts.join(" · ")
+}
+
+function alertRegionCode(value) {
+  var normalized = String(value || "").toLowerCase()
+  if (normalized === "atlantic") return "al"
+  if (normalized === "eastern pacific") return "ep"
+  if (normalized === "central pacific") return "cp"
+  if (normalized === "all nhc basins") return "all"
+  return ""
+}
+
+function alertThresholdValue(value) {
+  var match = String(value || "").match(/(\d{1,3})/)
+  return match ? clamp(Number(match[1]), 0, 100) : 40
+}
+
+function inAlertRegion(system, basin) {
+  return basin === "all" || String(system && system.basin || "") === basin
+}
+
+function alertSnapshot(storms, outlooks, regionValue, thresholdValue, includeNamedStorms) {
+  var basin = alertRegionCode(regionValue)
+  var threshold = alertThresholdValue(thresholdValue)
+  var output = {}
+  if (!basin) return output
+  var active = Array.isArray(storms) ? storms : []
+  var developing = Array.isArray(outlooks) ? outlooks : []
+  if (includeNamedStorms !== false) {
+    for (var s = 0; s < active.length; s++) {
+      if (!inAlertRegion(active[s], basin)) continue
+      var stormKey = "storm:" + String(active[s].id || "")
+      output[stormKey] = {
+        kind: "storm", key: stormKey, name: String(active[s].name || "Unnamed storm"),
+        basin: String(active[s].basin || ""), label: classificationLabel(active[s]), chance: 100
+      }
+    }
+  }
+  for (var o = 0; o < developing.length; o++) {
+    if (!inAlertRegion(developing[o], basin)) continue
+    var chance = Number(developing[o].sevenDayChance || 0)
+    var outlookKey = "outlook:" + String(developing[o].id || "")
+    output[outlookKey] = {
+      kind: "outlook", key: outlookKey, name: String(developing[o].name || developing[o].title || "Developing system"),
+      basin: String(developing[o].basin || ""), label: String(developing[o].classificationLabel || "Developing system"),
+      chance: chance, meetsThreshold: chance >= threshold
+    }
+  }
+  return output
+}
+
+function alertEvents(previous, current) {
+  var before = previous || {}
+  var after = current || {}
+  var events = []
+  for (var key in after) {
+    var item = after[key]
+    var old = before[key]
+    if (item.kind === "storm" && !old) events.push(item)
+    if (item.kind === "outlook" && item.meetsThreshold && (!old || !old.meetsThreshold)) events.push(item)
+  }
+  return events
+}
+
+function selectedIndexAfterRefresh(storms, selectedId) {
+  var rows = Array.isArray(storms) ? storms : []
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i] && rows[i].id || "") === String(selectedId || "")) return i
+  }
+  return rows.length > 0 ? 0 : -1
+}

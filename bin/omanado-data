@@ -1,0 +1,911 @@
+#!/usr/bin/env python3
+"""Fetch and normalize National Hurricane Center tropical weather data.
+
+The Omarchy shell consumes a deliberately small JSON contract from this
+helper. Network and archive handling stay outside the long-running QML process,
+where response sizes, hosts, zip contents, and cache writes can be bounded.
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import copy
+import datetime as dt
+import html
+import io
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+from typing import Any, Callable, Iterable
+import urllib.parse
+import urllib.request
+import zipfile
+import xml.etree.ElementTree as ET
+
+
+VERSION = "0.2.0"
+CURRENT_STORMS_URL = "https://www.nhc.noaa.gov/CurrentStorms.json"
+SOURCE_URL = "https://www.nhc.noaa.gov/"
+OUTLOOK_URLS = {
+    "al": "https://www.nhc.noaa.gov/xgtwo/gtwo_atl.kmz",
+    "ep": "https://www.nhc.noaa.gov/xgtwo/gtwo_pac.kmz",
+    "cp": "https://www.nhc.noaa.gov/xgtwo/gtwo_cpac.kmz",
+}
+ALLOWED_HOSTS = frozenset(
+    {
+        "nhc.noaa.gov",
+        "www.nhc.noaa.gov",
+        "hurricanes.gov",
+        "www.hurricanes.gov",
+    }
+)
+MAX_CURRENT_BYTES = 1_000_000
+MAX_KMZ_BYTES = 10_000_000
+MAX_KML_BYTES = 18_000_000
+MAX_TEXT_BYTES = 750_000
+MAX_CACHE_BYTES = 8_000_000
+MAX_STORMS = 20
+MAX_OUTLOOKS = 24
+MAX_TRACK_POINTS = 40
+MAX_PAST_POINTS = 256
+MAX_CONE_POINTS = 420
+USER_AGENT = f"Omanado/{VERSION} (+https://github.com/olivoil/omanado)"
+
+CLASSIFICATION_LABELS = {
+    "TD": "Tropical depression",
+    "STD": "Subtropical depression",
+    "TS": "Tropical storm",
+    "STS": "Subtropical storm",
+    "HU": "Hurricane",
+    "TY": "Typhoon",
+    "PC": "Potential tropical cyclone",
+    "PTC": "Post-tropical cyclone",
+    "SD": "Subtropical depression",
+    "SS": "Subtropical storm",
+    "EX": "Extratropical cyclone",
+    "DB": "Disturbance",
+    "LO": "Low",
+    "WV": "Tropical wave",
+}
+
+BASIN_LABELS = {
+    "al": "Atlantic",
+    "ep": "Eastern Pacific",
+    "cp": "Central Pacific",
+}
+
+
+class DataError(RuntimeError):
+    """A bounded, user-safe failure while loading remote cyclone data."""
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+
+
+def cache_path() -> Path:
+    root = Path(
+        os.environ.get(
+            "XDG_CACHE_HOME", str(Path(os.environ.get("HOME", ".")) / ".cache")
+        )
+    )
+    return root / "omanado" / "storms.json"
+
+
+def safe_text(value: Any, limit: int = 160) -> str:
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
+    return " ".join(text.split())[:limit]
+
+
+def number(value: Any, fallback: float | None = None) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if math.isfinite(parsed) else fallback
+
+
+def integer(value: Any, fallback: int = 0) -> int:
+    parsed = number(value)
+    return int(round(parsed)) if parsed is not None else fallback
+
+
+def is_safe_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() in ALLOWED_HOSTS
+        and not parsed.username
+        and not parsed.password
+    )
+
+
+def safe_remote_url(value: Any) -> str:
+    url = safe_text(value, 2048)
+    return url if is_safe_url(url) else ""
+
+
+def fetch_bytes(url: str, maximum: int, timeout: int = 18) -> bytes:
+    if not is_safe_url(url):
+        raise DataError("remote URL is outside the NHC host allowlist")
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, application/vnd.google-earth.kmz, application/xml;q=0.9, */*;q=0.2",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            final_url = response.geturl()
+            if not is_safe_url(final_url):
+                raise DataError("NHC response redirected outside the host allowlist")
+            length = number(response.headers.get("Content-Length"))
+            if length is not None and length > maximum:
+                raise DataError("NHC response exceeded the size limit")
+            data = response.read(maximum + 1)
+    except DataError:
+        raise
+    except Exception as error:
+        raise DataError("NHC request failed") from error
+
+    if len(data) > maximum:
+        raise DataError("NHC response exceeded the size limit")
+    return data
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def first_descendant(element: ET.Element, name: str) -> ET.Element | None:
+    for child in element.iter():
+        if local_name(child.tag) == name:
+            return child
+    return None
+
+
+def descendant_text(element: ET.Element, name: str) -> str:
+    child = first_descendant(element, name)
+    return safe_text(child.text if child is not None else "", 512)
+
+
+def extended_data(element: ET.Element) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for child in element.iter():
+        if local_name(child.tag) != "Data":
+            continue
+        name = safe_text(child.attrib.get("name"), 80)
+        value = first_descendant(child, "value")
+        if name and value is not None:
+            output[name] = safe_text(value.text, 6000)
+    return output
+
+
+def parse_xml(data: bytes) -> ET.Element:
+    if len(data) > MAX_KML_BYTES:
+        raise DataError("KML exceeded the size limit")
+    try:
+        return ET.fromstring(data)
+    except ET.ParseError as error:
+        raise DataError("NHC KML was not valid XML") from error
+
+
+def extract_kml(data: bytes) -> bytes:
+    if data.lstrip().startswith(b"<"):
+        if len(data) > MAX_KML_BYTES:
+            raise DataError("KML exceeded the size limit")
+        return data
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as error:
+        raise DataError("NHC KMZ was not a valid archive") from error
+
+    with archive:
+        files = [entry for entry in archive.infolist() if not entry.is_dir()]
+        if len(files) > 40:
+            raise DataError("NHC KMZ contained too many files")
+        if sum(entry.file_size for entry in files) > MAX_KML_BYTES:
+            raise DataError("NHC KMZ expanded beyond the size limit")
+        candidates = [entry for entry in files if entry.filename.lower().endswith(".kml")]
+        if len(candidates) != 1:
+            raise DataError("NHC KMZ did not contain exactly one KML document")
+        if candidates[0].file_size > MAX_KML_BYTES:
+            raise DataError("NHC KML exceeded the size limit")
+        return archive.read(candidates[0])
+
+
+def coordinate_pairs(text: str) -> list[list[float]]:
+    output: list[list[float]] = []
+    for token in str(text or "").replace("\n", " ").split():
+        fields = token.split(",")
+        if len(fields) < 2:
+            continue
+        lon = number(fields[0])
+        lat = number(fields[1])
+        if lon is None or lat is None or not -180 <= lon <= 180 or not -90 <= lat <= 90:
+            continue
+        output.append([round(lon, 5), round(lat, 5)])
+    return output
+
+
+def point_distance(point: list[float], start: list[float], end: list[float]) -> float:
+    x, y = point
+    x1, y1 = start
+    x2, y2 = end
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return math.hypot(x - x1, y - y1)
+    amount = max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)))
+    nearest_x = x1 + amount * dx
+    nearest_y = y1 + amount * dy
+    return math.hypot(x - nearest_x, y - nearest_y)
+
+
+def simplify_line(points: list[list[float]], tolerance: float) -> list[list[float]]:
+    if len(points) <= 2:
+        return points[:]
+    largest = 0.0
+    index = 0
+    for candidate in range(1, len(points) - 1):
+        distance = point_distance(points[candidate], points[0], points[-1])
+        if distance > largest:
+            largest = distance
+            index = candidate
+    if largest <= tolerance:
+        return [points[0], points[-1]]
+    left = simplify_line(points[: index + 1], tolerance)
+    right = simplify_line(points[index:], tolerance)
+    return left[:-1] + right
+
+
+def simplify_ring(points: list[list[float]]) -> list[list[float]]:
+    if len(points) < 4:
+        return points
+    closed = points[0] == points[-1]
+    working = points[:-1] if closed else points[:]
+    if len(working) < 3:
+        return points
+
+    # Start at the westernmost vertex so the open line given to RDP is stable.
+    pivot = min(range(len(working)), key=lambda index: (working[index][0], working[index][1]))
+    rotated = working[pivot:] + working[:pivot] + [working[pivot]]
+    simplified = simplify_line(rotated, 0.025)
+    if len(simplified) > MAX_CONE_POINTS:
+        stride = math.ceil(len(simplified) / MAX_CONE_POINTS)
+        simplified = simplified[::stride]
+        if simplified[-1] != rotated[-1]:
+            simplified.append(rotated[-1])
+    if simplified[0] != simplified[-1]:
+        simplified.append(simplified[0])
+    return simplified
+
+
+def category_for_wind(wind_knots: int) -> int:
+    if wind_knots < 64:
+        return 0
+    if wind_knots < 83:
+        return 1
+    if wind_knots < 96:
+        return 2
+    if wind_knots < 113:
+        return 3
+    if wind_knots < 137:
+        return 4
+    return 5
+
+
+def official_mph(wind_knots: int) -> int:
+    """Match NHC's whole-five mph presentation for knot-based wind values."""
+    converted = max(0.0, float(wind_knots) * 1.15078)
+    return int(math.floor(converted / 5.0 + 0.5) * 5)
+
+
+def intensity_label(classification: str, wind_knots: int) -> str:
+    category = category_for_wind(wind_knots)
+    if category:
+        return f"Category {category} hurricane"
+    return CLASSIFICATION_LABELS.get(classification.upper(), "Tropical cyclone")
+
+
+def movement_compass(degrees: int) -> str:
+    labels = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    return labels[int((degrees % 360) / 22.5 + 0.5) % 16]
+
+
+def strip_markup(value: str) -> str:
+    without_tags = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return safe_text(html.unescape(without_tags), 256)
+
+
+def html_field(description: str, pattern: str) -> str:
+    match = re.search(pattern, description, flags=re.IGNORECASE | re.DOTALL)
+    return strip_markup(match.group(1)) if match else ""
+
+
+def parse_forecast_track(data: bytes) -> list[dict[str, Any]]:
+    document = parse_xml(extract_kml(data))
+    points: list[dict[str, Any]] = []
+    seen: set[tuple[int, float, float]] = set()
+    for placemark in document.iter():
+        if local_name(placemark.tag) != "Placemark":
+            continue
+        point_node = first_descendant(placemark, "Point")
+        if point_node is None:
+            continue
+        coordinates_node = first_descendant(point_node, "coordinates")
+        coordinates = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
+        if not coordinates:
+            continue
+
+        description_node = first_descendant(placemark, "description")
+        description = str(description_node.text or "") if description_node is not None else ""
+        style = descendant_text(placemark, "styleUrl").lower()
+        hour_match = re.search(r"(\d{1,3})\s*(?:hr|hour)\s+forecast", description, re.IGNORECASE)
+        if hour_match:
+            forecast_hour = int(hour_match.group(1))
+        elif "advisory information" in description.lower() or "initial_point" in style:
+            forecast_hour = 0
+        else:
+            continue
+
+        wind_match = re.search(r"Maximum\s+Wind:\s*(\d+)\s*knots(?:\s*\((\d+)\s*mph\))?", description, re.IGNORECASE)
+        gust_match = re.search(r"Wind\s+Gusts:\s*(\d+)\s*knots(?:\s*\((\d+)\s*mph\))?", description, re.IGNORECASE)
+        wind_knots = int(wind_match.group(1)) if wind_match else 0
+        wind_mph = int(wind_match.group(2)) if wind_match and wind_match.group(2) else official_mph(wind_knots)
+        gust_knots = int(gust_match.group(1)) if gust_match else 0
+        gust_mph = int(gust_match.group(2)) if gust_match and gust_match.group(2) else official_mph(gust_knots)
+        lon, lat = coordinates[0]
+        identity = (forecast_hour, lon, lat)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        category = category_for_wind(wind_knots)
+        points.append(
+            {
+                "forecastHour": forecast_hour,
+                "latitude": lat,
+                "longitude": lon,
+                "validTimeLabel": html_field(description, r"Valid\s+at:\s*(.*?)</td>"),
+                "windKnots": wind_knots,
+                "windMph": wind_mph,
+                "gustKnots": gust_knots,
+                "gustMph": gust_mph,
+                "category": category,
+                "intensityLabel": intensity_label("HU" if category else "TS", wind_knots),
+            }
+        )
+
+    points.sort(key=lambda point: point["forecastHour"])
+    return points[:MAX_TRACK_POINTS]
+
+
+def parse_cone(data: bytes) -> list[list[list[float]]]:
+    document = parse_xml(extract_kml(data))
+    rings: list[list[list[float]]] = []
+    for polygon in document.iter():
+        if local_name(polygon.tag) != "Polygon":
+            continue
+        outer = first_descendant(polygon, "outerBoundaryIs")
+        coordinates_node = first_descendant(outer, "coordinates") if outer is not None else None
+        points = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
+        if len(points) >= 4:
+            rings.append(simplify_ring(points))
+    return rings[:8]
+
+
+def parse_best_track(data: bytes) -> list[dict[str, Any]]:
+    document = parse_xml(extract_kml(data))
+    points: list[dict[str, Any]] = []
+    for placemark in document.iter():
+        if local_name(placemark.tag) != "Placemark":
+            continue
+        point_node = first_descendant(placemark, "Point")
+        if point_node is None:
+            continue
+        coordinates_node = first_descendant(point_node, "coordinates")
+        coordinates = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
+        if not coordinates:
+            continue
+        lon, lat = coordinates[0]
+        wind_knots = integer(descendant_text(placemark, "intensity"))
+        classification = descendant_text(placemark, "stormType").upper()
+        timestamp = descendant_text(placemark, "atcfdtg")
+        iso_time = ""
+        if re.fullmatch(r"\d{10}", timestamp):
+            try:
+                parsed = dt.datetime.strptime(timestamp, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
+                iso_time = parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
+            except ValueError:
+                iso_time = ""
+        category = category_for_wind(wind_knots)
+        points.append(
+            {
+                "latitude": lat,
+                "longitude": lon,
+                "time": iso_time,
+                "timeLabel": descendant_text(placemark, "dtg"),
+                "classification": classification,
+                "windKnots": wind_knots,
+                "windMph": integer(descendant_text(placemark, "intensityMPH"), official_mph(wind_knots)),
+                "pressureMb": integer(descendant_text(placemark, "minSeaLevelPres")),
+                "category": category,
+            }
+        )
+    points.sort(key=lambda point: point["time"] or point["timeLabel"])
+    return points[-MAX_PAST_POINTS:]
+
+
+def parse_percentage(value: Any) -> int:
+    match = re.search(r"(\d{1,3})", str(value or ""))
+    return max(0, min(100, int(match.group(1)))) if match else 0
+
+
+def outlook_title(discussion: str) -> str:
+    match = re.match(r"\s*\d+\.\s*([^:]+):", discussion)
+    return safe_text(match.group(1), 120) if match else "Tropical disturbance"
+
+
+def outlook_identity_name(title: str) -> tuple[str, str]:
+    parenthetical = re.search(r"\(([^)]+)\)", title)
+    if parenthetical:
+        lifecycle_match = re.match(
+            r"(Remnants? of|Post-Tropical Cyclone|Tropical Storm|Hurricane|Tropical Depression)\s+(.+)",
+            parenthetical.group(1),
+            flags=re.IGNORECASE,
+        )
+        if lifecycle_match:
+            raw_lifecycle = safe_text(lifecycle_match.group(1), 48)
+            lifecycle = "Remnant" if raw_lifecycle.lower().startswith("remnant") else raw_lifecycle
+            return safe_text(lifecycle_match.group(2), 64), lifecycle
+    return title, "Developing system"
+
+
+def outlook_issue_time(document: ET.Element) -> str:
+    name = descendant_text(document, "name")
+    match = re.search(
+        r"-\s*(?P<stamp>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+"
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
+        r"\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s*$",
+        name,
+    )
+    if not match:
+        return ""
+    try:
+        parsed = dt.datetime.strptime(match.group("stamp"), "%a %b %d %H:%M:%S %Y")
+    except ValueError:
+        return ""
+    return parsed.replace(tzinfo=dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
+    document = parse_xml(extract_kml(data))
+    issued_at = outlook_issue_time(document)
+    grouped: dict[str, dict[str, Any]] = {}
+
+    for placemark in document.iter():
+        if local_name(placemark.tag) != "Placemark":
+            continue
+        fields = extended_data(placemark)
+        disturbance = safe_text(fields.get("Disturbance"), 12)
+        discussion = safe_text(fields.get("Discussion"), 3600)
+        if not disturbance or not discussion:
+            continue
+
+        key = disturbance
+        row = grouped.setdefault(
+            key,
+            {
+                "disturbance": disturbance,
+                "discussion": discussion,
+                "twoDayChance": parse_percentage(fields.get("2day_percentage")),
+                "twoDayCategory": safe_text(fields.get("2day_category"), 24).title(),
+                "sevenDayChance": parse_percentage(fields.get("7day_percentage")),
+                "sevenDayCategory": safe_text(fields.get("7day_category"), 24).title(),
+                "latitude": None,
+                "longitude": None,
+                "area": [],
+            },
+        )
+
+        point_node = first_descendant(placemark, "Point")
+        if point_node is not None:
+            coordinates_node = first_descendant(point_node, "coordinates")
+            coordinates = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
+            if coordinates:
+                row["longitude"], row["latitude"] = coordinates[0]
+
+        polygon_node = first_descendant(placemark, "Polygon")
+        if polygon_node is not None:
+            outer = first_descendant(polygon_node, "outerBoundaryIs")
+            coordinates_node = first_descendant(outer, "coordinates") if outer is not None else None
+            coordinates = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
+            if len(coordinates) >= 4:
+                row["area"].append(simplify_ring(coordinates))
+
+    output: list[dict[str, Any]] = []
+    for row in grouped.values():
+        latitude = number(row.get("latitude"))
+        longitude = number(row.get("longitude"))
+        if latitude is None or longitude is None:
+            rings = row.get("area") if isinstance(row.get("area"), list) else []
+            points = [point for ring in rings for point in ring if len(point) >= 2]
+            if not points:
+                continue
+            longitude = sum(point[0] for point in points) / len(points)
+            latitude = sum(point[1] for point in points) / len(points)
+
+        basin = source_basin
+        # The eastern-Pacific outlook includes the central North Pacific east
+        # of 180°. Assign those systems to the CPHC region and let the dedicated
+        # central-Pacific feed win during de-duplication below.
+        if source_basin == "ep" and longitude <= -140:
+            basin = "cp"
+
+        title = outlook_title(row["discussion"])
+        name, lifecycle = outlook_identity_name(title)
+        output.append(
+            {
+                "id": f"{basin}-outlook-{row['disturbance']}",
+                "name": name,
+                "title": title,
+                "basin": basin,
+                "basinLabel": BASIN_LABELS[basin],
+                "classification": "REM" if lifecycle.lower().startswith("remnant") else "DB",
+                "classificationLabel": lifecycle,
+                "latitude": round(latitude, 4),
+                "longitude": round(longitude, 4),
+                "twoDayChance": row["twoDayChance"],
+                "twoDayCategory": row["twoDayCategory"] or "Low",
+                "sevenDayChance": row["sevenDayChance"],
+                "sevenDayCategory": row["sevenDayCategory"] or "Low",
+                "updatedAt": issued_at,
+                "discussionExcerpt": row["discussion"],
+                "discussionUrl": "https://www.nhc.noaa.gov/gtwo.php",
+                "area": row["area"],
+            }
+        )
+    return output[:MAX_OUTLOOKS]
+
+
+def parse_forecast_discussion(data: bytes) -> dict[str, str]:
+    try:
+        source = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise DataError("NHC forecast discussion was not valid UTF-8") from error
+    match = re.search(r"<pre[^>]*>(.*?)</pre>", source, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        raise DataError("NHC forecast discussion did not contain a text product")
+
+    text = html.unescape(re.sub(r"<[^>]+>", " ", match.group(1))).replace("\r", "")
+    lines = [line.rstrip() for line in text.splitlines()]
+    title = "NHC forecast discussion"
+    title_index = 0
+    for index, line in enumerate(lines):
+        if " Discussion Number" in line:
+            title = safe_text(line, 180)
+            title_index = index
+            break
+
+    body_lines: list[str] = []
+    for line in lines[title_index + 1 :]:
+        if line.strip().upper().startswith("FORECAST POSITIONS AND MAX WINDS"):
+            break
+        body_lines.append(line)
+    while body_lines and not body_lines[0].strip():
+        body_lines.pop(0)
+    # The office and issue-time lines precede the meteorological narrative.
+    body_lines = body_lines[2:] if len(body_lines) >= 2 else body_lines
+    paragraphs = [safe_text(part, 1800) for part in re.split(r"\n\s*\n", "\n".join(body_lines))]
+    paragraphs = [part for part in paragraphs if part]
+    excerpt = safe_text(" ".join(paragraphs[:2]), 900)
+    forecaster_match = re.search(r"Forecaster\s+([^\s<]+)", text, flags=re.IGNORECASE)
+    return {
+        "title": title,
+        "excerpt": excerpt,
+        "forecaster": safe_text(forecaster_match.group(1), 64) if forecaster_match else "",
+    }
+
+
+def nested_url(storm: dict[str, Any], key: str) -> str:
+    value = storm.get(key)
+    return safe_remote_url(value.get("kmzFile")) if isinstance(value, dict) else ""
+
+
+def base_storm(storm: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    storm_id = safe_text(storm.get("id"), 16).lower()
+    if not re.fullmatch(r"[a-z]{2}\d{6}", storm_id):
+        raise DataError("NHC storm identifier was not valid")
+    name = safe_text(storm.get("name"), 64) or storm_id.upper()
+    classification = safe_text(storm.get("classification"), 8).upper()
+    wind_knots = max(0, integer(storm.get("intensity")))
+    category = category_for_wind(wind_knots)
+    latitude = number(storm.get("latitudeNumeric", storm.get("latitude_numeric")))
+    longitude = number(storm.get("longitudeNumeric", storm.get("longitude_numeric")))
+    if latitude is None or longitude is None or not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise DataError("NHC storm coordinates were not valid")
+    direction = integer(storm.get("movementDir")) % 360
+    advisory = storm.get("publicAdvisory") if isinstance(storm.get("publicAdvisory"), dict) else {}
+    discussion = storm.get("forecastDiscussion") if isinstance(storm.get("forecastDiscussion"), dict) else {}
+    graphics = storm.get("forecastGraphics") if isinstance(storm.get("forecastGraphics"), dict) else {}
+    basin_code = storm_id[:2]
+
+    normalized = {
+        "id": storm_id,
+        "name": name,
+        "basin": basin_code,
+        "basinLabel": BASIN_LABELS.get(basin_code, basin_code.upper()),
+        "classification": classification,
+        "classificationLabel": CLASSIFICATION_LABELS.get(classification, "Tropical cyclone"),
+        "category": category,
+        "intensityLabel": intensity_label(classification, wind_knots),
+        "windKnots": wind_knots,
+        "windMph": official_mph(wind_knots),
+        "pressureMb": max(0, integer(storm.get("pressure"))),
+        "latitude": round(latitude, 4),
+        "longitude": round(longitude, 4),
+        "movementDirectionDegrees": direction,
+        "movementDirectionLabel": movement_compass(direction),
+        "movementSpeedMph": max(0, integer(storm.get("movementSpeed"))),
+        "updatedAt": safe_text(storm.get("lastUpdate"), 40),
+        "advisoryNumber": safe_text(advisory.get("advNum"), 12),
+        "advisoryUrl": safe_remote_url(advisory.get("url")),
+        "discussionUrl": safe_remote_url(discussion.get("url")),
+        "discussionIssuedAt": safe_text(discussion.get("issuance"), 40),
+        "discussionTitle": "",
+        "discussionExcerpt": "",
+        "discussionForecaster": "",
+        "graphicsUrl": safe_remote_url(graphics.get("url")),
+        "track": [],
+        "pastTrack": [],
+        "cone": [],
+        "dataWarnings": [],
+    }
+    urls = {
+        "track": nested_url(storm, "forecastTrack"),
+        "cone": nested_url(storm, "trackCone"),
+        "pastTrack": nested_url(storm, "bestTrackGIS"),
+        "discussion": safe_remote_url(discussion.get("url")),
+    }
+    return normalized, urls
+
+
+def source_metadata() -> dict[str, str]:
+    return {
+        "name": "NOAA National Hurricane Center",
+        "url": SOURCE_URL,
+        "coverage": "Atlantic, Eastern Pacific, and Central Pacific basins",
+    }
+
+
+def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> dict[str, Any]:
+    raw = fetcher(CURRENT_STORMS_URL, MAX_CURRENT_BYTES)
+    try:
+        current = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DataError("NHC current storm data was not valid JSON") from error
+    rows = current.get("activeStorms") if isinstance(current, dict) else None
+    if not isinstance(rows, list):
+        raise DataError("NHC current storm data did not contain activeStorms")
+
+    storms: list[dict[str, Any]] = []
+    resources: list[dict[str, str]] = []
+    for row in rows[:MAX_STORMS]:
+        if not isinstance(row, dict):
+            continue
+        try:
+            normalized, urls = base_storm(row)
+        except DataError:
+            continue
+        storms.append(normalized)
+        resources.append(urls)
+
+    parser_for = {
+        "track": parse_forecast_track,
+        "cone": parse_cone,
+        "pastTrack": parse_best_track,
+        "discussion": parse_forecast_discussion,
+    }
+    jobs: dict[concurrent.futures.Future[bytes], tuple[int, str]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        for index, urls in enumerate(resources):
+            for layer, url in urls.items():
+                if url:
+                    maximum = MAX_TEXT_BYTES if layer == "discussion" else MAX_KMZ_BYTES
+                    jobs[executor.submit(fetcher, url, maximum)] = (index, layer)
+        for future in concurrent.futures.as_completed(jobs):
+            index, layer = jobs[future]
+            try:
+                parsed = parser_for[layer](future.result())
+                if layer == "discussion":
+                    storms[index]["discussionTitle"] = parsed["title"]
+                    storms[index]["discussionExcerpt"] = parsed["excerpt"]
+                    storms[index]["discussionForecaster"] = parsed["forecaster"]
+                else:
+                    storms[index][layer] = parsed
+            except Exception:
+                storms[index]["dataWarnings"].append(f"{layer} unavailable")
+
+    outlooks: list[dict[str, Any]] = []
+    outlook_jobs: dict[concurrent.futures.Future[bytes], str] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        for basin, url in OUTLOOK_URLS.items():
+            outlook_jobs[executor.submit(fetcher, url, MAX_KMZ_BYTES)] = basin
+        for future in concurrent.futures.as_completed(outlook_jobs):
+            basin = outlook_jobs[future]
+            try:
+                outlooks.extend(parse_outlooks(future.result(), basin))
+            except Exception:
+                continue
+
+    # The Pacific and Central Pacific products can describe the same area.
+    # Prefer the dedicated CPHC record when the point and title agree.
+    unique_outlooks: dict[tuple[str, int, int, str], dict[str, Any]] = {}
+    for outlook in outlooks:
+        identity = (
+            outlook["basin"],
+            round(outlook["latitude"]),
+            round(outlook["longitude"]),
+            re.sub(r"[^a-z0-9]+", "", outlook["name"].lower())[:32],
+        )
+        existing = unique_outlooks.get(identity)
+        if existing is None or len(outlook.get("area", [])) > len(existing.get("area", [])):
+            unique_outlooks[identity] = outlook
+    outlooks = list(unique_outlooks.values())[:MAX_OUTLOOKS]
+
+    storms.sort(key=lambda storm: (-storm["windKnots"], storm["name"].lower()))
+    outlooks.sort(key=lambda outlook: (-outlook["sevenDayChance"], outlook["name"].lower()))
+    regions = []
+    for basin, label in BASIN_LABELS.items():
+        regions.append(
+            {
+                "id": basin,
+                "name": label,
+                "activeCount": sum(1 for storm in storms if storm["basin"] == basin),
+                "outlookCount": sum(1 for outlook in outlooks if outlook["basin"] == basin),
+            }
+        )
+    return {
+        "schemaVersion": 2,
+        "status": "fresh",
+        "stale": False,
+        "fetchedAt": utc_now(),
+        "checkedAt": utc_now(),
+        "source": source_metadata(),
+        "error": "",
+        "storms": storms,
+        "outlooks": outlooks,
+        "regions": regions,
+    }
+
+
+def valid_payload(payload: Any) -> bool:
+    return (
+        isinstance(payload, dict)
+        and payload.get("schemaVersion") == 2
+        and isinstance(payload.get("storms"), list)
+        and len(payload["storms"]) <= MAX_STORMS
+        and isinstance(payload.get("outlooks"), list)
+        and len(payload["outlooks"]) <= MAX_OUTLOOKS
+    )
+
+
+def read_cache(path: Path | None = None) -> dict[str, Any] | None:
+    target = path or cache_path()
+    try:
+        if not target.is_file() or target.stat().st_size > MAX_CACHE_BYTES:
+            return None
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if valid_payload(payload) else None
+
+
+def write_cache(payload: dict[str, Any], path: Path | None = None) -> None:
+    target = path or cache_path()
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_CACHE_BYTES:
+        raise DataError("normalized cyclone data exceeded the cache size limit")
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent, prefix=".storms.", delete=False
+        ) as temporary:
+            temporary_name = temporary.name
+            os.chmod(temporary_name, 0o600)
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, target)
+    finally:
+        if temporary_name:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def unavailable_payload(message: str, cached: dict[str, Any] | None = None) -> dict[str, Any]:
+    if cached:
+        payload = copy.deepcopy(cached)
+        payload["status"] = "cached"
+        payload["stale"] = True
+        payload["checkedAt"] = utc_now()
+        payload["error"] = message
+        return payload
+    return {
+        "schemaVersion": 2,
+        "status": "error",
+        "stale": False,
+        "fetchedAt": "",
+        "checkedAt": utc_now(),
+        "source": source_metadata(),
+        "error": message,
+        "storms": [],
+        "outlooks": [],
+        "regions": [
+            {"id": basin, "name": label, "activeCount": 0, "outlookCount": 0}
+            for basin, label in BASIN_LABELS.items()
+        ],
+    }
+
+
+def fetch_with_fallback(
+    fetcher: Callable[[str, int], bytes] = fetch_bytes,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    try:
+        payload = build_live_payload(fetcher)
+        write_cache(payload, path)
+        return payload
+    except Exception as error:
+        print(f"omanado-data: {safe_text(error, 240)}", file=sys.stderr)
+        return unavailable_payload(
+            "The National Hurricane Center is unavailable. Showing the last saved advisory when possible.",
+            read_cache(path),
+        )
+
+
+def emit(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("fetch", help="Fetch live NHC data, falling back to the local cache")
+    subparsers.add_parser("cache", help="Print the last cached response without using the network")
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.command == "fetch":
+        emit(fetch_with_fallback())
+        return 0
+
+    cached = read_cache()
+    if cached:
+        payload = copy.deepcopy(cached)
+        payload["status"] = "cached"
+        payload["stale"] = True
+        payload["checkedAt"] = utc_now()
+        emit(payload)
+        return 0
+    emit(unavailable_payload("No saved NHC advisory is available yet."))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

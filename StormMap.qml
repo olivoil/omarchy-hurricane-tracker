@@ -1,0 +1,696 @@
+import QtQuick
+import Quickshell.Io
+import "Model.js" as Model
+
+Item {
+  id: root
+
+  property var storms: []
+  property var outlooks: []
+  property string selectedKey: ""
+  readonly property var systems: Model.orderedSystems(storms, outlooks)
+  readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
+  readonly property bool selectedIsStorm: selectedSystem && selectedSystem.kind === "storm"
+
+  property real centreLatitude: 18
+  property real centreLongitude: -78
+  property real zoom: 1
+  property real minimumZoom: 0.94
+  property real maximumZoom: 32
+  property real bottomInset: 0
+  property bool userMoved: false
+  readonly property real viewHeight: Math.max(1, height - bottomInset)
+  readonly property real mapCenterX: width / 2
+  readonly property real mapCenterY: viewHeight / 2
+  readonly property real baseGlobeRadius: Math.max(80, Math.min(width, viewHeight) * 0.43)
+  readonly property real globeRadius: baseGlobeRadius * zoom
+  readonly property bool wholeGlobeVisible: globeRadius <= Math.min(width, viewHeight) / 2 - 8
+
+  property color oceanColor: "#102f38"
+  property color deepOceanColor: "#0a242c"
+  property color landColor: "#42585a"
+  property color landOutlineColor: "#6f8585"
+  property color gridColor: "#9bb1b0"
+  property color textColor: "#eef6f4"
+  property color mutedTextColor: "#b1c4c1"
+  property color coneColor: "#55c9d4"
+  property color trackColor: "#eef6f4"
+  property color surfaceColor: "#101b20"
+  property color surfaceBorderColor: "#50636a"
+  property string fontFamily: "sans-serif"
+
+  property var countries: []
+  property string hoveredKey: ""
+  property var hoveredPoint: null
+  property real hoverX: 0
+  property real hoverY: 0
+  property string hoverTitle: ""
+  property string hoverDetail: ""
+
+  signal systemActivated(string key)
+  signal pointerActivity()
+
+  Accessible.name: "NHC tropical systems map"
+  Accessible.description: "Drag to pan or rotate the globe, use the wheel to zoom, and select a cyclone or outlook marker"
+  Accessible.role: Accessible.Pane
+
+  function coordinateLatitude(value) {
+    return Array.isArray(value) ? Number(value[1]) : Number(value && value.latitude)
+  }
+
+  function coordinateLongitude(value) {
+    return Array.isArray(value) ? Number(value[0]) : Number(value && value.longitude)
+  }
+
+  function projectUnwrapped(latitude, longitude) {
+    var sphere = Model.orthographicPoint(latitude, Model.wrapLongitude(longitude), centreLatitude, centreLongitude)
+    return {
+      x: mapCenterX + sphere.x * globeRadius,
+      y: mapCenterY - sphere.y * globeRadius,
+      visible: sphere.z >= -0.002,
+      depth: sphere.z
+    }
+  }
+
+  function project(latitude, longitude) {
+    return projectUnwrapped(latitude, Model.longitudeNear(centreLongitude, longitude))
+  }
+
+  function unproject(x, y) {
+    return Model.inverseOrthographic(
+      (Number(x) - mapCenterX) / globeRadius,
+      (mapCenterY - Number(y)) / globeRadius,
+      centreLatitude,
+      centreLongitude
+    )
+  }
+
+  function applyBounds(bounds, coordinates, minimum) {
+    var fit = Model.orthographicFit(coordinates, bounds)
+    centreLatitude = fit.centreLatitude
+    centreLongitude = fit.centreLongitude
+    var horizontal = width * 0.38 / (baseGlobeRadius * fit.horizontalExtent)
+    var vertical = viewHeight * 0.34 / (baseGlobeRadius * fit.verticalExtent)
+    zoom = Model.clamp(Math.min(horizontal, vertical), minimum, maximumZoom)
+    userMoved = false
+    clearHover()
+    canvas.requestPaint()
+  }
+
+  function fitSelected() {
+    if (width < 40 || height < 40) return
+    if (!selectedSystem) {
+      showGlobe()
+      return
+    }
+    applyBounds(Model.systemBounds(selectedSystem), Model.systemCoordinates(selectedSystem), 1.7)
+  }
+
+  function fitRegion(basin) {
+    if (width < 40 || height < 40) return
+    applyBounds(
+      Model.regionBounds(storms, outlooks, basin),
+      Model.regionCoordinates(storms, outlooks, basin),
+      1.12
+    )
+  }
+
+  function showGlobe(basin) {
+    if (basin) {
+      var bounds = Model.regionBounds(storms, outlooks, basin)
+      centreLatitude = bounds.centreLatitude
+      centreLongitude = bounds.centreLongitude
+    } else if (selectedSystem) {
+      centreLatitude = Model.clamp(Number(selectedSystem.latitude || 15), -55, 55)
+      centreLongitude = Number(selectedSystem.longitude || -95)
+    } else {
+      centreLatitude = 14
+      centreLongitude = -105
+    }
+    zoom = minimumZoom
+    userMoved = true
+    clearHover()
+    canvas.requestPaint()
+  }
+
+  function zoomAt(amount, x, y) {
+    var anchorX = x === undefined ? mapCenterX : Number(x)
+    var anchorY = y === undefined ? mapCenterY : Number(y)
+    var coordinate = unproject(anchorX, anchorY)
+    var anchorDistance = Math.hypot(anchorX - mapCenterX, anchorY - mapCenterY) / globeRadius
+    var next = Model.clamp(zoom * amount, minimumZoom, maximumZoom)
+    if (Math.abs(next - zoom) < 0.001) return
+    zoom = next
+    if (coordinate && anchorDistance < 0.9) {
+      // Keep the geographic point beneath the pointer while the same sphere
+      // grows or shrinks. A few small corrections converge quickly and avoid
+      // introducing a second, flat projection for close views.
+      for (var iteration = 0; iteration < 3; iteration++) {
+        var after = unproject(anchorX, anchorY)
+        if (!after) break
+        var longitudeTarget = Model.longitudeNear(after.longitude, coordinate.longitude)
+        centreLongitude = Model.wrapLongitude(centreLongitude + longitudeTarget - after.longitude)
+        centreLatitude = Model.clamp(centreLatitude + coordinate.latitude - after.latitude, -82, 82)
+      }
+    }
+    userMoved = true
+    canvas.requestPaint()
+  }
+
+  function zoomIn() { zoomAt(1.32) }
+  function zoomOut() { zoomAt(1 / 1.32) }
+  function resetView() { fitSelected() }
+
+  function clearHover() {
+    hoveredKey = ""
+    hoveredPoint = null
+    hoverTitle = ""
+    hoverDetail = ""
+  }
+
+  function nearestSystem(x, y, radius) {
+    var best = null
+    var bestDistance = radius
+    for (var i = 0; i < systems.length; i++) {
+      var system = systems[i]
+      if (!system || !Model.validCoordinate(system.latitude, system.longitude)) continue
+      var point = project(system.latitude, system.longitude)
+      if (!point.visible) continue
+      var distance = Math.hypot(point.x - x, point.y - y)
+      if (distance <= bestDistance) {
+        bestDistance = distance
+        best = system
+      }
+    }
+    return best
+  }
+
+  function nearestForecastPoint(x, y, radius) {
+    var rows = selectedIsStorm && Array.isArray(selectedSystem.track) ? selectedSystem.track : []
+    var best = null
+    var bestDistance = radius
+    for (var i = 0; i < rows.length; i++) {
+      var point = project(rows[i].latitude, rows[i].longitude)
+      if (!point.visible) continue
+      var distance = Math.hypot(point.x - x, point.y - y)
+      if (distance <= bestDistance) {
+        bestDistance = distance
+        best = rows[i]
+      }
+    }
+    return best
+  }
+
+  function updateHover(x, y) {
+    hoverX = x
+    hoverY = y
+    var forecast = nearestForecastPoint(x, y, 13)
+    if (forecast) {
+      hoveredPoint = forecast
+      hoveredKey = ""
+      hoverTitle = Model.forecastHourLabel(forecast) + " · " + Model.classificationLabel(forecast)
+      hoverDetail = Model.forecastTimeLabel(forecast) + " · " + Number(forecast.windMph || 0) + " mph"
+      canvas.requestPaint()
+      return
+    }
+    var system = nearestSystem(x, y, 22)
+    hoveredPoint = null
+    hoveredKey = system ? system.key : ""
+    if (system) {
+      hoverTitle = String(system.name || system.title || "Tropical system")
+      hoverDetail = Model.systemClassificationLabel(system) + " · " + Model.systemMetric(system)
+    } else {
+      hoverTitle = ""
+      hoverDetail = ""
+    }
+    canvas.requestPaint()
+  }
+
+  function beginGeoPath(context, coordinates, closePath) {
+    var rows = Array.isArray(coordinates) ? coordinates : []
+    if (rows.length === 0) return false
+    var previousLongitude = Model.longitudeNear(centreLongitude, coordinateLongitude(rows[0]))
+    var started = false
+    var allVisible = true
+    context.beginPath()
+    for (var i = 0; i < rows.length; i++) {
+      if (i > 0) previousLongitude = Model.longitudeNear(previousLongitude, coordinateLongitude(rows[i]))
+      var point = projectUnwrapped(coordinateLatitude(rows[i]), previousLongitude)
+      if (!point.visible) {
+        started = false
+        allVisible = false
+        continue
+      }
+      if (!started) {
+        context.moveTo(point.x, point.y)
+        started = true
+      } else {
+        context.lineTo(point.x, point.y)
+      }
+    }
+    if (closePath && allVisible && started) context.closePath()
+    return started
+  }
+
+  function drawBackground(context) {
+    context.globalAlpha = 1
+    context.fillStyle = deepOceanColor
+    context.fillRect(0, 0, width, height)
+    context.fillStyle = oceanColor
+    context.beginPath()
+    context.arc(mapCenterX, mapCenterY, globeRadius, 0, Math.PI * 2)
+    context.fill()
+    context.strokeStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, wholeGlobeVisible ? 0.52 : 0.28)
+    context.lineWidth = wholeGlobeVisible ? 2 : 1
+    context.stroke()
+    context.globalAlpha = 1
+  }
+
+  function clipToGlobe(context) {
+    context.beginPath()
+    context.arc(mapCenterX, mapCenterY, globeRadius - 1, 0, Math.PI * 2)
+    context.clip()
+  }
+
+  function drawGrid(context) {
+    var spacing = zoom < 1.6 ? 30 : (zoom < 4.5 ? 10 : (zoom < 12 ? 5 : 2))
+    context.lineWidth = 0.8
+    context.strokeStyle = Qt.rgba(gridColor.r, gridColor.g, gridColor.b, zoom < 2 ? 0.15 : 0.20)
+    for (var longitude = -180; longitude < 180; longitude += spacing) {
+      var meridian = []
+      for (var latitude = -90; latitude <= 90; latitude += 3) meridian.push([longitude, latitude])
+      if (beginGeoPath(context, meridian, false)) context.stroke()
+    }
+    for (var parallel = -60; parallel <= 60; parallel += spacing) {
+      var latitudeLine = []
+      for (var lon = -180; lon <= 180; lon += 4) latitudeLine.push([lon, parallel])
+      if (beginGeoPath(context, latitudeLine, false)) context.stroke()
+    }
+  }
+
+  function preparedRing(ring) {
+    if (!Array.isArray(ring) || ring.length < 3) return null
+    var longitudes = []
+    var latitudes = []
+    var previous = Model.longitudeNear(centreLongitude, coordinateLongitude(ring[0]))
+    longitudes.push(previous)
+    latitudes.push(coordinateLatitude(ring[0]))
+    var sum = previous
+    for (var i = 1; i < ring.length; i++) {
+      previous = Model.longitudeNear(previous, coordinateLongitude(ring[i]))
+      longitudes.push(previous)
+      latitudes.push(coordinateLatitude(ring[i]))
+      sum += previous
+    }
+    var mean = sum / longitudes.length
+    return { longitudes: longitudes, latitudes: latitudes, shift: Math.round((centreLongitude - mean) / 360) * 360 }
+  }
+
+  function paintCountryRing(context, ring) {
+    var prepared = preparedRing(ring)
+    if (!prepared) return
+    for (var copy = 0; copy <= 0; copy++) {
+      var shift = prepared.shift + copy * 360
+      var started = false
+      var any = false
+      var allVisible = true
+      context.beginPath()
+      for (var i = 0; i < prepared.longitudes.length; i++) {
+        var point = projectUnwrapped(prepared.latitudes[i], prepared.longitudes[i] + shift)
+        if (!point.visible) {
+          started = false
+          allVisible = false
+          continue
+        }
+        any = true
+        if (!started) {
+          context.moveTo(point.x, point.y)
+          started = true
+        } else {
+          context.lineTo(point.x, point.y)
+        }
+      }
+      if (!any) continue
+      if (allVisible) context.closePath()
+      context.fill()
+      context.stroke()
+    }
+  }
+
+  function drawCountries(context) {
+    context.fillStyle = landColor
+    context.strokeStyle = Qt.rgba(landOutlineColor.r, landOutlineColor.g, landOutlineColor.b, 0.76)
+    context.lineWidth = zoom < 3 ? 0.75 : 1.0
+    context.lineJoin = "round"
+    var rows = Array.isArray(countries) ? countries : []
+    for (var i = 0; i < rows.length; i++) {
+      var geometry = rows[i] && rows[i].geometry
+      var polygons = geometry && Array.isArray(geometry.coordinates) ? geometry.coordinates : []
+      for (var p = 0; p < polygons.length; p++) {
+        var ring = polygons[p] && polygons[p][0]
+        paintCountryRing(context, ring)
+      }
+    }
+  }
+
+  function drawCountryLabels(context) {
+    if (zoom < 1.3) return
+    var rows = Array.isArray(countries) ? countries : []
+    var maximumRank = zoom < 2.3 ? 2 : (zoom < 5 ? 4 : 6)
+    context.textAlign = "center"
+    context.textBaseline = "middle"
+    context.font = "600 " + Math.round(Math.min(12, 8 + Math.sqrt(zoom))) + "px '" + fontFamily + "'"
+    context.fillStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, zoom < 2 ? 0.44 : 0.58)
+    for (var i = 0; i < rows.length; i++) {
+      var properties = rows[i] && rows[i].properties
+      if (!properties || Number(properties.labelRank || 9) > maximumRank) continue
+      if (!Model.validCoordinate(properties.labelLatitude, properties.labelLongitude)) continue
+      var point = project(properties.labelLatitude, properties.labelLongitude)
+      if (!point.visible || point.x < 20 || point.x > width - 20 || point.y < 20 || point.y > height - 20) continue
+      context.fillText(String(properties.name || "").toUpperCase(), point.x, point.y)
+    }
+  }
+
+  function drawCone(context, storm) {
+    var rings = storm && Array.isArray(storm.cone) ? storm.cone : []
+    context.fillStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.22)
+    context.strokeStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.88)
+    context.lineWidth = 1.4
+    for (var i = 0; i < rings.length; i++) {
+      if (!beginGeoPath(context, rings[i], true)) continue
+      context.fill()
+      context.stroke()
+    }
+  }
+
+  function drawPath(context, rows, color, widthValue, dashed) {
+    if (!Array.isArray(rows) || rows.length < 2 || !beginGeoPath(context, rows, false)) return
+    context.strokeStyle = color
+    context.lineWidth = widthValue
+    context.lineCap = "round"
+    context.lineJoin = "round"
+    if (context.setLineDash) context.setLineDash(dashed ? [6, 6] : [])
+    context.stroke()
+    if (context.setLineDash) context.setLineDash([])
+  }
+
+  function drawPastTrack(context, storm) {
+    var rows = storm && Array.isArray(storm.pastTrack) ? storm.pastTrack.slice() : []
+    if (rows.length > 0) rows.push({ latitude: storm.latitude, longitude: storm.longitude })
+    drawPath(context, rows, Qt.rgba(trackColor.r, trackColor.g, trackColor.b, 0.50), 1.8, true)
+  }
+
+  function drawForecastTrack(context, storm) {
+    var rows = storm && Array.isArray(storm.track) ? storm.track : []
+    drawPath(context, rows, Qt.rgba(trackColor.r, trackColor.g, trackColor.b, 0.94), 2.4, false)
+    context.textAlign = "center"
+    context.textBaseline = "bottom"
+    context.font = "700 10px '" + fontFamily + "'"
+    for (var i = 0; i < rows.length; i++) {
+      var forecast = rows[i]
+      if (Number(forecast.forecastHour || 0) === 0) continue
+      var point = project(forecast.latitude, forecast.longitude)
+      if (!point.visible || point.x < -20 || point.x > width + 20 || point.y < -20 || point.y > height + 20) continue
+      var color = Model.severityColor(forecast)
+      var radius = hoveredPoint === forecast ? 7 : 5
+      context.fillStyle = color
+      context.strokeStyle = deepOceanColor
+      context.lineWidth = 2
+      context.beginPath()
+      context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+      context.fill()
+      context.stroke()
+      if (zoom >= 2.2) {
+        context.fillStyle = textColor
+        context.fillText(Model.forecastHourLabel(forecast), point.x, point.y - radius - 4)
+      }
+    }
+  }
+
+  function drawOutlook(context, outlook) {
+    var selected = outlook.key === selectedKey
+    var hovered = outlook.key === hoveredKey
+    var color = Qt.color(Model.outlookColor(outlook))
+    var rings = Array.isArray(outlook.area) ? outlook.area : []
+    context.fillStyle = Qt.rgba(color.r, color.g, color.b, selected ? 0.25 : 0.10)
+    context.strokeStyle = Qt.rgba(color.r, color.g, color.b, selected ? 0.96 : 0.62)
+    context.lineWidth = selected ? 2 : 1.2
+    if (context.setLineDash) context.setLineDash(selected ? [7, 5] : [4, 6])
+    for (var r = 0; r < rings.length; r++) {
+      if (!beginGeoPath(context, rings[r], true)) continue
+      context.fill()
+      context.stroke()
+    }
+    if (context.setLineDash) context.setLineDash([])
+
+    var point = project(outlook.latitude, outlook.longitude)
+    if (!point.visible) return
+    var radius = selected ? 13 : 10
+    if (selected || hovered) {
+      context.strokeStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, selected ? 0.76 : 0.48)
+      context.lineWidth = 1.5
+      context.beginPath()
+      context.arc(point.x, point.y, radius + 5, 0, Math.PI * 2)
+      context.stroke()
+    }
+    context.fillStyle = color
+    context.strokeStyle = deepOceanColor
+    context.lineWidth = 2
+    context.beginPath()
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+    context.strokeStyle = "#f7faf9"
+    context.lineWidth = 2
+    context.beginPath()
+    context.moveTo(point.x - radius * 0.35, point.y - radius * 0.35)
+    context.lineTo(point.x + radius * 0.35, point.y + radius * 0.35)
+    context.moveTo(point.x + radius * 0.35, point.y - radius * 0.35)
+    context.lineTo(point.x - radius * 0.35, point.y + radius * 0.35)
+    context.stroke()
+    if (selected || zoom >= 1.75) {
+      context.textAlign = "left"
+      context.textBaseline = "middle"
+      context.font = "700 " + (selected ? 12 : 10) + "px '" + fontFamily + "'"
+      context.fillStyle = textColor
+      context.fillText(String(outlook.name || outlook.title || "OUTLOOK").toUpperCase(), point.x + radius + 8, point.y - 1)
+    }
+  }
+
+  function drawStormMarker(context, storm) {
+    if (!storm || !Model.validCoordinate(storm.latitude, storm.longitude)) return
+    var point = project(storm.latitude, storm.longitude)
+    if (!point.visible || point.x < -60 || point.x > width + 60 || point.y < -60 || point.y > height + 60) return
+    var selected = storm.key === selectedKey
+    var hovered = storm.key === hoveredKey
+    var radius = selected ? 15 : 11
+    var color = Model.severityColor(storm)
+    if (selected || hovered) {
+      context.strokeStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, selected ? 0.76 : 0.48)
+      context.lineWidth = selected ? 2 : 1.5
+      context.beginPath()
+      context.arc(point.x, point.y, radius + 5, 0, Math.PI * 2)
+      context.stroke()
+    }
+    context.fillStyle = color
+    context.strokeStyle = deepOceanColor
+    context.lineWidth = 2.2
+    context.beginPath()
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+    context.strokeStyle = "#f7faf9"
+    context.lineWidth = Math.max(1.5, radius * 0.15)
+    context.lineCap = "round"
+    context.beginPath()
+    context.arc(point.x - radius * 0.23, point.y - radius * 0.06, radius * 0.42, 0.15, 4.25)
+    context.stroke()
+    context.beginPath()
+    context.arc(point.x + radius * 0.23, point.y + radius * 0.06, radius * 0.42, 3.3, 7.4)
+    context.stroke()
+    context.textAlign = "left"
+    context.textBaseline = "middle"
+    context.font = "700 " + (selected ? 12 : 10) + "px '" + fontFamily + "'"
+    context.fillStyle = textColor
+    context.fillText(String(storm.name || "").toUpperCase(), point.x + radius + 8, point.y - 1)
+  }
+
+  function paint(context) {
+    context.clearRect(0, 0, width, height)
+    drawBackground(context)
+    context.save()
+    clipToGlobe(context)
+    drawGrid(context)
+    drawCountries(context)
+    drawCountryLabels(context)
+    for (var o = 0; o < systems.length; o++) if (systems[o].kind === "outlook") drawOutlook(context, systems[o])
+    if (selectedIsStorm) {
+      drawCone(context, selectedSystem)
+      drawPastTrack(context, selectedSystem)
+      drawForecastTrack(context, selectedSystem)
+    }
+    for (var s = 0; s < systems.length; s++) if (systems[s].kind === "storm") drawStormMarker(context, systems[s])
+    context.restore()
+    context.strokeStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, wholeGlobeVisible ? 0.24 : 0.12)
+    context.lineWidth = 1
+    context.beginPath()
+    context.arc(mapCenterX, mapCenterY, globeRadius + 3, 0, Math.PI * 2)
+    context.stroke()
+  }
+
+  FileView {
+    path: Qt.resolvedUrl("assets/countries.json").toString().replace(/^file:\/\//, "")
+    watchChanges: false
+    printErrors: true
+    onLoaded: {
+      try {
+        var collection = JSON.parse(text())
+        root.countries = Array.isArray(collection.features) ? collection.features : []
+      } catch (error) {
+        root.countries = []
+      }
+      canvas.requestPaint()
+    }
+  }
+
+  Canvas {
+    id: canvas
+    anchors.fill: parent
+    antialiasing: true
+    renderStrategy: Canvas.Immediate
+    onPaint: root.paint(getContext("2d"))
+  }
+
+  MouseArea {
+    id: pointer
+    anchors.fill: parent
+    hoverEnabled: true
+    acceptedButtons: Qt.LeftButton
+    cursorShape: pressed ? Qt.ClosedHandCursor
+      : (root.hoveredKey !== "" || root.hoveredPoint ? Qt.PointingHandCursor : Qt.OpenHandCursor)
+    property real previousX: 0
+    property real previousY: 0
+    property real travel: 0
+
+    onPressed: function(mouse) {
+      previousX = mouse.x
+      previousY = mouse.y
+      travel = 0
+      root.pointerActivity()
+    }
+    onPositionChanged: function(mouse) {
+      if (pressed) {
+        var dx = mouse.x - previousX
+        var dy = mouse.y - previousY
+        travel += Math.abs(dx) + Math.abs(dy)
+        var latitudeDegreesPerPixel = 57.2957795 / root.globeRadius
+        var longitudeDegreesPerPixel = latitudeDegreesPerPixel
+          / Math.max(0.28, Math.cos(root.centreLatitude * Math.PI / 180))
+        root.centreLongitude = Model.wrapLongitude(root.centreLongitude - dx * longitudeDegreesPerPixel)
+        root.centreLatitude = Model.clamp(root.centreLatitude + dy * latitudeDegreesPerPixel, -82, 82)
+        root.userMoved = true
+        previousX = mouse.x
+        previousY = mouse.y
+        root.clearHover()
+        canvas.requestPaint()
+      } else {
+        root.updateHover(mouse.x, mouse.y)
+      }
+      root.pointerActivity()
+    }
+    onReleased: function(mouse) {
+      if (travel < 7) {
+        var system = root.nearestSystem(mouse.x, mouse.y, 25)
+        if (system) root.systemActivated(system.key)
+      }
+      root.updateHover(mouse.x, mouse.y)
+    }
+    onExited: {
+      if (!pressed) root.clearHover()
+      canvas.requestPaint()
+    }
+    onWheel: function(wheel) {
+      root.zoomAt(wheel.angleDelta.y > 0 ? 1.22 : 1 / 1.22, wheel.x, wheel.y)
+      root.pointerActivity()
+      wheel.accepted = true
+    }
+  }
+
+  Rectangle {
+    visible: root.wholeGlobeVisible
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: root.bottomInset + 16
+    width: globeLabel.implicitWidth + 24
+    height: 28
+    radius: height / 2
+    color: root.surfaceColor
+    border.width: 1
+    border.color: root.surfaceBorderColor
+    z: 4
+
+    Text {
+      id: globeLabel
+      anchors.centerIn: parent
+      text: "GLOBE · DRAG TO ROTATE"
+      color: root.mutedTextColor
+      font.family: root.fontFamily
+      font.pixelSize: 10
+      font.bold: true
+      font.letterSpacing: 0.5
+    }
+  }
+
+  Rectangle {
+    id: tooltip
+    visible: root.hoverTitle !== ""
+    x: Math.max(12, Math.min(root.width - width - 12, root.hoverX + 16))
+    y: Math.max(12, Math.min(root.height - height - 12, root.hoverY + 16))
+    width: Math.max(titleText.implicitWidth, detailText.implicitWidth) + 24
+    height: titleText.implicitHeight + detailText.implicitHeight + 18
+    radius: 7
+    color: root.surfaceColor
+    border.width: 1
+    border.color: root.surfaceBorderColor
+    z: 5
+
+    Text {
+      id: titleText
+      anchors.left: parent.left
+      anchors.leftMargin: 12
+      anchors.top: parent.top
+      anchors.topMargin: 8
+      text: root.hoverTitle
+      textFormat: Text.PlainText
+      color: root.textColor
+      font.family: root.fontFamily
+      font.pixelSize: 12
+      font.bold: true
+    }
+    Text {
+      id: detailText
+      anchors.left: titleText.left
+      anchors.top: titleText.bottom
+      anchors.topMargin: 2
+      text: root.hoverDetail
+      textFormat: Text.PlainText
+      color: root.mutedTextColor
+      font.family: root.fontFamily
+      font.pixelSize: 10
+    }
+  }
+
+  onStormsChanged: canvas.requestPaint()
+  onOutlooksChanged: canvas.requestPaint()
+  onSelectedKeyChanged: Qt.callLater(root.fitSelected)
+  onCentreLatitudeChanged: canvas.requestPaint()
+  onCentreLongitudeChanged: canvas.requestPaint()
+  onZoomChanged: canvas.requestPaint()
+  onWidthChanged: if (!userMoved) Qt.callLater(root.fitSelected)
+  onHeightChanged: if (!userMoved) Qt.callLater(root.fitSelected)
+  onBottomInsetChanged: if (!userMoved) Qt.callLater(root.fitSelected)
+  onOceanColorChanged: canvas.requestPaint()
+  onLandColorChanged: canvas.requestPaint()
+  onConeColorChanged: canvas.requestPaint()
+  Component.onCompleted: Qt.callLater(root.fitSelected)
+}

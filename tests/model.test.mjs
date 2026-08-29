@@ -1,0 +1,124 @@
+import assert from "node:assert/strict"
+import fs from "node:fs"
+import path from "node:path"
+import vm from "node:vm"
+import { fileURLToPath } from "node:url"
+
+const testDir = path.dirname(fileURLToPath(import.meta.url))
+const source = fs.readFileSync(path.join(testDir, "..", "Model.js"), "utf8")
+const model = { Math, Number, Array, String, Date, RegExp, isFinite }
+vm.createContext(model)
+vm.runInContext(source, model)
+
+assert.equal(model.wrapLongitude(190), -170)
+assert.equal(model.longitudeNear(170, -175), 185)
+assert.equal(model.validCoordinate(20, -70), true)
+assert.equal(model.validCoordinate(100, -70), false)
+
+const storm = {
+  id: "al012026",
+  name: "Ada",
+  classification: "HU",
+  classificationLabel: "Hurricane",
+  basin: "al",
+  category: 2,
+  windMph: 105,
+  pressureMb: 968,
+  latitude: 22.4,
+  longitude: -73.1,
+  movementDirectionLabel: "WNW",
+  movementSpeedMph: 12,
+  advisoryNumber: "014",
+  updatedAt: "2026-08-28T15:00:00Z",
+  track: [
+    { latitude: 22.4, longitude: -73.1 },
+    { latitude: 26.8, longitude: -77.2 }
+  ],
+  pastTrack: [{ latitude: 19.8, longitude: -69.2 }],
+  cone: [[[-73.4, 22.1], [-80.2, 27.2], [-78.4, 29.0], [-73.4, 22.1]]]
+}
+
+assert.equal(model.classificationLabel(storm), "Category 2 hurricane")
+assert.equal(model.severityCode(storm), "2")
+assert.equal(model.severityColor(storm), "#ee9858")
+assert.equal(model.formatWind(storm), "105 mph")
+assert.equal(model.formatPressure(storm), "968 mb")
+assert.equal(model.formatMovement(storm), "WNW at 12 mph")
+assert.equal(model.advisoryLabel(storm, Date.parse("2026-08-28T18:00:00Z")), "Advisory 14 · 3h ago")
+assert.equal(model.forecastHourLabel({ forecastHour: 0 }), "Now")
+assert.equal(model.forecastHourLabel({ forecastHour: 48 }), "+48h")
+assert.equal(
+  model.forecastTimeLabel({ validTimeLabel: "11:00 AM EDT August 29, 2026" }),
+  "Aug 29 · 11:00 AM EDT"
+)
+
+const bounds = model.stormBounds(storm)
+assert.ok(bounds.centreLatitude > 20 && bounds.centreLatitude < 28)
+assert.ok(bounds.centreLongitude < -70 && bounds.centreLongitude > -80)
+assert.ok(bounds.latitudeSpan >= 8)
+assert.ok(bounds.longitudeSpan >= 12)
+
+const outlook = {
+  id: "al-outlook-1",
+  name: "Dolly",
+  title: "East of the Leeward Islands (Remnants of Dolly)",
+  basin: "al",
+  classificationLabel: "Remnant",
+  latitude: 16.2,
+  longitude: -51.4,
+  twoDayChance: 0,
+  sevenDayChance: 10,
+  discussionExcerpt: "Redevelopment is unlikely.",
+  area: [[[-67, 19], [-78, 22], [-75, 27], [-65, 24], [-67, 19]]]
+}
+
+assert.equal(model.systemKey(outlook), "outlook:al-outlook-1")
+assert.equal(model.outlookChanceLabel(outlook), "0% in 2 days · 10% in 7 days")
+assert.equal(model.systemClassificationLabel(outlook), "Remnant")
+assert.equal(model.discussionExcerpt(outlook), "Redevelopment is unlikely.")
+assert.ok(model.systemBounds(outlook).longitudeSpan >= 12)
+assert.ok(model.systemCoordinates(outlook).length >= 5)
+
+const systems = model.orderedSystems([storm], [outlook])
+assert.deepEqual(Array.from(systems, item => item.key), ["storm:al012026", "outlook:al-outlook-1"])
+assert.equal(model.selectedKeyAfterRefresh(systems, "outlook:al-outlook-1"), "outlook:al-outlook-1")
+assert.equal(model.selectedKeyAfterRefresh(systems, "missing"), "storm:al012026")
+
+const regionRows = model.regionalRows([storm], [outlook])
+assert.equal(regionRows[0].kind, "region")
+assert.equal(regionRows[0].name, "Atlantic")
+assert.equal(regionRows[0].activeCount, 1)
+assert.equal(regionRows[0].outlookCount, 1)
+assert.equal(regionRows.filter(row => row.kind === "region").length, 3)
+
+const globe = model.orthographicPoint(20, -70, 20, -70)
+assert.ok(Math.abs(globe.x) < 1e-9)
+assert.ok(Math.abs(globe.y) < 1e-9)
+assert.ok(globe.z > 0.999)
+const inverse = model.inverseOrthographic(globe.x, globe.y, 20, -70)
+assert.ok(Math.abs(inverse.latitude - 20) < 1e-9)
+assert.ok(Math.abs(inverse.longitude + 70) < 1e-9)
+const sphericalFit = model.orthographicFit(model.systemCoordinates(storm), bounds)
+assert.equal(sphericalFit.centreLatitude, bounds.centreLatitude)
+assert.equal(sphericalFit.centreLongitude, bounds.centreLongitude)
+assert.ok(sphericalFit.horizontalExtent > 0.08)
+assert.ok(sphericalFit.verticalExtent > 0.05)
+assert.ok(sphericalFit.minimumDepth > 0.9)
+assert.ok(model.regionCoordinates([storm], [outlook], "al").length > model.systemCoordinates(storm).length)
+
+assert.equal(model.alertRegionCode("Atlantic"), "al")
+assert.equal(model.alertThresholdValue("Medium (40%)"), 40)
+const quietSnapshot = model.alertSnapshot([], [outlook], "Atlantic", "Medium (40%)", true)
+assert.equal(model.alertEvents({}, quietSnapshot).length, 0)
+const developing = { ...outlook, sevenDayChance: 40 }
+const developingSnapshot = model.alertSnapshot([], [developing], "Atlantic", "Medium (40%)", true)
+assert.equal(model.alertEvents(quietSnapshot, developingSnapshot)[0].name, "Dolly")
+
+assert.equal(model.safeOfficialUrl("https://www.nhc.noaa.gov/text/MIATCPAT1.shtml").length > 0, true)
+assert.equal(model.safeOfficialUrl("http://www.nhc.noaa.gov/text"), "")
+assert.equal(model.safeOfficialUrl("https://nhc.noaa.gov.attacker.example/text"), "")
+assert.equal(model.activeSummary([]), "No active NHC cyclones")
+assert.equal(model.activeSummary([storm]), "1 active cyclone: Ada")
+assert.equal(model.selectedIndexAfterRefresh([storm], "al012026"), 0)
+assert.equal(model.selectedIndexAfterRefresh([storm], "missing"), 0)
+assert.equal(model.trackingSummary([storm], [outlook]), "1 active cyclone · 1 outlook area")

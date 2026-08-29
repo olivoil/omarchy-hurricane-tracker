@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <Point><coordinates>-69.2,19.8,0</coordinates></Point>
+      <stormType>TS</stormType><intensity>50</intensity><intensityMPH>58</intensityMPH>
+      <minSeaLevelPres>998</minSeaLevelPres><atcfdtg>2026082712</atcfdtg><dtg>1200 UTC AUG 27</dtg>
+    </Placemark>
+    <Placemark>
+      <Point><coordinates>-71.0,21.1,0</coordinates></Point>
+      <stormType>HU</stormType><intensity>70</intensity><intensityMPH>81</intensityMPH>
+      <minSeaLevelPres>982</minSeaLevelPres><atcfdtg>2026082800</atcfdtg><dtg>0000 UTC AUG 28</dtg>
+    </Placemark>
+  </Document>
+</kml>
