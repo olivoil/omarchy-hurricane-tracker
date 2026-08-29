@@ -1,9 +1,9 @@
 # Hurricane Tracker
 
 Hurricane Tracker is a native Omarchy weather plugin. Its compact bar signal
-opens a calm, spatial view of active National Hurricane Center cyclones, their past and
-forecast center tracks, official cone of uncertainty, and regional development
-outlooks.
+opens a calm, spatial view of active National Hurricane Center cyclones, their
+past and forecast center tracks, official cone of uncertainty, and regional
+development outlooks.
 
 The project keeps its original `io.github.olivoil.omanado` plugin ID and cache
 path so existing installations continue to update normally.
@@ -11,6 +11,8 @@ path so existing installations continue to update normally.
 The interaction rhythm is inspired by Windy's hurricane view, but the plugin
 uses its own native QML interface, public-domain map geometry, and official
 NOAA/NHC data. It does not use Windy assets or APIs.
+
+![Hurricane Tracker showing Tropical Storm Karina's forecast cone, regional systems, and NHC discussion](preview.png)
 
 ## What it does
 
