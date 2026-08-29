@@ -95,16 +95,6 @@ Item {
     return partial ? "Partial · " + age : age
   }
 
-  function regionalRowsHeight(rows) {
-    var data = Array.isArray(rows) ? rows : []
-    var total = 0
-    for (var i = 0; i < data.length; i++) {
-      total += data[i].kind === "region" ? Style.space(44)
-        : (data[i].kind === "empty" ? Style.space(28) : Style.space(68))
-    }
-    return total
-  }
-
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
@@ -993,7 +983,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
-          height: Style.space(48)
+          height: Style.space(56)
 
           Text {
             anchors.left: parent.left
@@ -1002,9 +992,9 @@ Item {
             text: "SYSTEMS"
             color: root.foreground
             font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.heading
             font.bold: true
-            font.letterSpacing: 0.6
+            font.letterSpacing: 0.8
           }
           Text {
             anchors.right: parent.right
@@ -1029,10 +1019,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: listHeader.bottom
-          height: Math.min(root.regionalRowsHeight(root.regionalRows),
-            root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
-              ? sidebar.height * 0.48
-              : sidebar.height - listHeader.height)
+          anchors.bottom: discussionPanel.visible ? discussionPanel.top : parent.bottom
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           model: root.regionalRows
@@ -1070,9 +1057,9 @@ Item {
               text: String(rowData.name || "REGION").toUpperCase()
               color: root.foreground
               font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.bodySmall
+              font.pixelSize: Style.font.caption
               font.bold: true
-              font.letterSpacing: 0.45
+              font.letterSpacing: 0.7
             }
 
             Text {
@@ -1219,10 +1206,10 @@ Item {
           id: discussionPanel
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.top: systemList.bottom
+          anchors.bottom: parent.bottom
           visible: root.selectedSystem && Model.discussionExcerpt(root.selectedSystem) !== ""
           height: visible ? Math.max(0, Math.min(
-            sidebar.height - y,
+            sidebar.height * 0.36,
             Math.min(Style.space(300), Style.space(86)
               + Math.max(Style.space(68), Math.ceil(discussionText.implicitHeight))))) : 0
           clip: true
