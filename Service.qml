@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
@@ -7,7 +8,29 @@ Item {
 
   // Injected by the Omarchy shell.
   property var shell: null
+  property var manifest: null
   property var settings: ({})
+
+  // Omarchy does not currently have a manifest field for launcher entries, so
+  // the service installs one while the plugin is enabled. A pre-existing file
+  // without our marker is always left alone.
+  readonly property string launcherEntryPath: Quickshell.env("HOME")
+    + "/.local/share/applications/io.github.olivoil.hurricane-tracker.desktop"
+  readonly property string launcherEntryMarker: "X-Hurricane-Tracker-Managed=true"
+  readonly property string installLauncherEntryScript:
+    '[ -f "$1" ] || exit 0\n'
+    + 'if [ -e "$2" ] && ! grep -Fqx -- "$3" "$2"; then exit 0; fi\n'
+    + 'mkdir -p -- "${2%/*}" || exit 0\n'
+    + 'tmp="${2}.hurricane-tracker.new.$$"\n'
+    + 'trap \'rm -f -- "$tmp"\' EXIT\n'
+    + 'while IFS= read -r line || [ -n "$line" ]; do\n'
+    + '  if [ "$line" = "Icon=@ICON@" ]; then printf "Icon=%s\\n" "$4";\n'
+    + '  else printf "%s\\n" "$line"; fi\n'
+    + 'done < "$1" > "$tmp" || exit 0\n'
+    + 'if ! cmp -s -- "$tmp" "$2"; then mv -f -- "$tmp" "$2" || exit 0; fi\n'
+  readonly property string removeLauncherEntryScript:
+    'if grep -Fqx -- "$2" "$1" 2>/dev/null; then rm -f -- "$1"; fi\n'
+  property bool launcherEntryInstalled: false
 
   property var payload: ({
     schemaVersion: 2,
@@ -39,7 +62,7 @@ Item {
   property string appliedAlertConfig: ""
   property var pendingNotification: null
 
-  readonly property string backendPath: Qt.resolvedUrl("bin/omanado-data").toString().replace(/^file:\/\//, "")
+  readonly property string backendPath: Qt.resolvedUrl("bin/hurricane-tracker-data").toString().replace(/^file:\/\//, "")
   readonly property string notificationIconPath: Qt.resolvedUrl("assets/hurricane-tracker.svg").toString().replace(/^file:\/\//, "")
   readonly property string status: String(payload && payload.status || "loading")
   readonly property bool stale: payload && payload.stale === true
@@ -59,6 +82,32 @@ Item {
   readonly property string alertStatus: alertsEnabled
     ? alertRegion + " · " + Model.alertThresholdValue(formationThreshold) + "%+"
     : "Off"
+
+  // The shell injects manifest after createObject(), so source paths are
+  // resolved when that property arrives rather than in Component.onCompleted.
+  onManifestChanged: {
+    var dir = manifest && manifest.__sourceDir
+    if (launcherEntryInstalled || !dir) return
+    launcherEntryInstalled = true
+    Quickshell.execDetached([
+      "sh", "-c", installLauncherEntryScript, "sh",
+      dir + "/hurricane-tracker.desktop",
+      launcherEntryPath,
+      launcherEntryMarker,
+      dir + "/assets/hurricane-tracker.svg"
+    ])
+  }
+
+  // Disabling and removing a plugin both destroy its service. Delete the
+  // launcher only when it is still the entry managed by this plugin.
+  Component.onDestruction: {
+    if (!launcherEntryInstalled) return
+    Quickshell.execDetached([
+      "sh", "-c", removeLauncherEntryScript, "sh",
+      launcherEntryPath,
+      launcherEntryMarker
+    ])
+  }
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined

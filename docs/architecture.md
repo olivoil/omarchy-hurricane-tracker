@@ -3,9 +3,9 @@
 Hurricane Tracker is one Omarchy plugin with three shell kinds:
 
 ```text
-BarWidget.qml ─┐
-               ├─ Service.qml ─ Process ─ bin/omanado-data ─ NOAA/NHC
-Omanado.qml ───┘                         └─ user cache
+BarWidget.qml ────────┐
+                      ├─ Service.qml ─ Process ─ bin/hurricane-tracker-data ─ NOAA/NHC
+HurricaneTracker.qml ─┘                                  └─ user cache
      └─ StormMap.qml + Model.js + Natural Earth geometry
 ```
 
@@ -16,7 +16,9 @@ starts the helper process, validates the normalized payload, and exposes the
 same cyclone, outlook, and region arrays to every bar instance and the overlay.
 It also maintains a session-local alert baseline and sends at most one
 region-scoped notification for a refresh. This avoids one network poll per
-monitor and avoids startup notification floods.
+monitor and avoids startup notification floods. While enabled, the service also
+manages the plugin-owned desktop entry that exposes the overlay through
+Omarchy's application launcher; it leaves any unmarked user entry untouched.
 
 `BarWidget.qml` stays deliberately small. It shows whether any systems are
 active, forwards settings to the shared service, and opens the overlay through
@@ -24,7 +26,7 @@ the shell's normal plugin IPC route.
 
 ## Data boundary
 
-`bin/omanado-data` is a Python standard-library helper. It:
+`bin/hurricane-tracker-data` is a Python standard-library helper. It:
 
 1. Downloads NHC's current-storm JSON and three graphical outlook products
    from fixed URLs.

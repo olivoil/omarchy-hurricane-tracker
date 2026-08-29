@@ -251,7 +251,7 @@ Item {
     anchors { top: true; bottom: true; left: true; right: true }
     mask: Region { item: card }
     color: "transparent"
-    WlrLayershell.namespace: "omanado"
+    WlrLayershell.namespace: "hurricane-tracker"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: root.opened && cardHover.hovered
       ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None

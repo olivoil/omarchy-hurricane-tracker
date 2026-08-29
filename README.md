@@ -34,6 +34,9 @@ Python 3.
 omarchy plugin add https://github.com/olivoil/omarchy-hurricane-tracker.git --enable
 ```
 
+Once enabled, open it from `Super+Space` by searching for **Hurricane Tracker**.
+The plugin removes its launcher entry when it is disabled or uninstalled.
+
 It also needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` to download
 advisories and outlooks.
 
@@ -83,9 +86,10 @@ products for forecast discussion excerpts.
 Network requests are limited to NHC-owned HTTPS hosts, and downloads and
 expanded archives are size-limited before parsing.
 
-The latest data is cached at `~/.cache/omanado/storms.json`. If you have set
-`$XDG_CACHE_HOME`, the cache is stored in `$XDG_CACHE_HOME/omanado/storms.json`
-instead. It contains public weather data only.
+The latest data is cached at `~/.cache/hurricane-tracker/storms.json`. If you
+have set `$XDG_CACHE_HOME`, the cache is stored in
+`$XDG_CACHE_HOME/hurricane-tracker/storms.json` instead. It contains public
+weather data only.
 
 > Hurricane Tracker is an awareness tool, not an emergency warning system. The
 > forecast cone shows the probable path of the storm's center; dangerous wind,
@@ -109,8 +113,8 @@ omarchy plugin remove io.github.olivoil.hurricane-tracker
 ```
 
 Omarchy leaves the cached weather data behind. If you want to remove it as
-well, delete `~/.cache/omanado/storms.json`, or the equivalent file under your
-custom `$XDG_CACHE_HOME`.
+well, delete `~/.cache/hurricane-tracker/storms.json`, or the equivalent file
+under your custom `$XDG_CACHE_HOME`.
 
 ## Development
 
