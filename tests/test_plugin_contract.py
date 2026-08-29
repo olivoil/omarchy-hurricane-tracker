@@ -54,6 +54,9 @@ class PluginContractTests(unittest.TestCase):
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
         self.assertIn("hurricane-tracker.desktop", service)
         self.assertIn("X-Hurricane-Tracker-Managed=true", service)
+        self.assertIn('Quickshell.env("XDG_DATA_HOME")', service)
+        self.assertIn("launcherIntentFile.setText", service)
+        self.assertIn("blockWrites: true", service)
         self.assertIn("Component.onDestruction", service)
 
     def test_generated_map_has_bounded_geometry(self):

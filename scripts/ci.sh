@@ -6,7 +6,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
 python -m unittest discover -s tests -p 'test_*.py' -v
-node --test tests/model.test.mjs
+node --test tests/*.test.mjs
 node scripts/build-map-data.mjs --check
 
 if command -v qmllint >/dev/null 2>&1; then

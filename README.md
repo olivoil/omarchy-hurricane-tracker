@@ -104,7 +104,9 @@ omarchy restart shell
 ```
 
 Restarting the shell makes sure the QML interface and data helper are updated
-together. Your alert settings and cached NHC data are preserved.
+together. Your alert settings are preserved. Version 0.0.1 used a different
+cache location, so its first update starts a fresh weather cache; later updates
+preserve the cache at the path above.
 
 ## Uninstall
 

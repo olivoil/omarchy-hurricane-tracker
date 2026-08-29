@@ -19,6 +19,9 @@ region-scoped notification for a refresh. This avoids one network poll per
 monitor and avoids startup notification floods. While enabled, the service also
 manages the plugin-owned desktop entry that exposes the overlay through
 Omarchy's application launcher; it leaves any unmarked user entry untouched.
+Launcher changes first record the latest desired state synchronously, then a
+locked detached worker reconciles the desktop entry to that state. This keeps
+plugin reload, disable, and removal operations correctly ordered.
 
 `BarWidget.qml` stays deliberately small. It shows whether any systems are
 active, forwards settings to the shared service, and opens the overlay through
