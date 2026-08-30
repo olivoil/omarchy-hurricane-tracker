@@ -18,6 +18,7 @@ does not currently include storms tracked by the JTWC or other agencies.
 - Forecast intensity shown with both labels and color
 - Excerpts from the latest NHC discussions, with links to the full advisories
 - Optional notifications for new cyclones and rising formation chances
+- A global Alerts destination for locally saved locations and proximity notifications
 - Keyboard navigation, map controls, and support for reduced motion
 - Cached data when the NHC is temporarily unavailable
 
@@ -42,7 +43,7 @@ advisories and outlooks.
 Hurricane Tracker checks for new NHC data every 15 minutes by default. You can
 change the interval in Omarchy's bar settings.
 
-Notifications are off until you choose a region. You can be notified when:
+Broad basin notifications are off until you choose a basin. You can be notified when:
 
 - an outlook area's seven-day formation chance reaches 20%, 40%, or 70%; or
 - the NHC begins issuing advisories for a new cyclone.
@@ -51,6 +52,26 @@ Alerts can cover the Atlantic, Eastern Pacific, Central Pacific, or all three.
 When you turn them on, existing systems are treated as the starting point, so
 you will not get a burst of notifications for storms already underway.
 
+Open **Alerts** in the app header to save up to 12 locations such as home,
+family, or a destination. Give each location a 250 km, 500 km, or 1,000 km
+watch radius, then click its position on the globe. The map keeps saved
+locations quiet as dots and reveals their alert areas while editing. Location
+notifications are sent when:
+
+- an NHC formation area within that radius reaches your formation threshold; or
+- an official NHC forecast cone or center track enters the radius.
+
+Formation notifications are early awareness only. They do not claim that a
+developing system will affect the saved place. Place notifications use the same
+quiet starting baseline as basin notifications and are grouped when one refresh
+produces several updates.
+
+Watch places are stored locally in
+`~/.config/omanado/watch-places.json`, or under `$XDG_CONFIG_HOME` when set. The
+file is written with user-only permissions. Current source coverage is limited
+to NHC basins; a place elsewhere remains saved but is marked as outside the
+current source coverage.
+
 ## Controls
 
 | Input | Action |
@@ -58,9 +79,12 @@ you will not get a burst of notifications for storms already underway.
 | Left-click the bar icon | Open or close Hurricane Tracker |
 | Middle-click the bar icon | Refresh NHC data |
 | Right-click the bar icon | Open the NHC website |
+| Click **Cyclones** | Open the tracker menu |
+| Click **Alerts** | View, add, edit, or remove watched locations |
 | Click a system or map marker | Select it and fit it on the map |
-| Click a basin heading | Expand or collapse it; expanding also fits it on the map |
-| Click **View all** | Fit every system in the expanded basin on the map |
+| Click **View all** beside a basin | Fit every system in that always-open basin on the map |
+| Click a watched location | Select it and fit it on the map |
+| Click the map while adding a location | Set or move the watch point |
 | Drag the map | Move around the globe |
 | Mouse wheel | Zoom at the pointer |
 | Up / Down | Select the previous or next system |
@@ -69,7 +93,7 @@ you will not get a burst of notifications for storms already underway.
 | `G` or `0` | Show the whole globe |
 | `R` | Refresh |
 | `O` | Open the selected system's official advisory |
-| Escape | Close Hurricane Tracker |
+| Escape | Close the current menu or alert view, then close Hurricane Tracker |
 
 ## Data and safety
 
@@ -100,7 +124,7 @@ omarchy restart shell
 ```
 
 Restarting the shell makes sure the QML interface and data helper are updated
-together. Your alert settings and cached NHC data are preserved.
+together. Your alert settings, watch places, and cached NHC data are preserved.
 
 ## Uninstall
 
@@ -108,9 +132,10 @@ together. Your alert settings and cached NHC data are preserved.
 omarchy plugin remove io.github.olivoil.hurricane-tracker
 ```
 
-Omarchy leaves the cached weather data behind. If you want to remove it as
-well, delete `~/.cache/omanado/storms.json`, or the equivalent file under your
-custom `$XDG_CACHE_HOME`.
+Omarchy leaves cached weather data and saved watch places behind. If you want to
+remove them as well, delete `~/.cache/omanado/storms.json` and
+`~/.config/omanado/watch-places.json`, or their equivalents under your custom
+XDG directories.
 
 ## Development
 

@@ -461,6 +461,357 @@ function trackingSummary(storms, outlooks) {
   return parts.join(" · ")
 }
 
+var EARTH_RADIUS_KM = 6371.0088
+var UNREACHABLE_DISTANCE_KM = 999999
+
+function radians(value) {
+  return Number(value) * Math.PI / 180
+}
+
+function haversineDistanceKm(latitudeA, longitudeA, latitudeB, longitudeB) {
+  if (!validCoordinate(latitudeA, longitudeA) || !validCoordinate(latitudeB, longitudeB))
+    return UNREACHABLE_DISTANCE_KM
+  var phiA = radians(latitudeA)
+  var phiB = radians(latitudeB)
+  var deltaPhi = phiB - phiA
+  var deltaLongitude = radians(longitudeNear(longitudeA, longitudeB) - Number(longitudeA))
+  var haversine = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2)
+    + Math.cos(phiA) * Math.cos(phiB)
+      * Math.sin(deltaLongitude / 2) * Math.sin(deltaLongitude / 2)
+  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)))
+}
+
+function watchCoordinate(value) {
+  var latitude = Array.isArray(value) ? Number(value[1]) : Number(value && value.latitude)
+  var longitude = Array.isArray(value) ? Number(value[0]) : Number(value && value.longitude)
+  return validCoordinate(latitude, longitude) ? { latitude: latitude, longitude: longitude } : null
+}
+
+function localWatchPoint(place, coordinate) {
+  var point = watchCoordinate(coordinate)
+  if (!point || !place || !validCoordinate(place.latitude, place.longitude)) return null
+  var latitude = Number(place.latitude)
+  var longitudeDelta = radians(longitudeNear(place.longitude, point.longitude) - Number(place.longitude))
+  return {
+    x: EARTH_RADIUS_KM * longitudeDelta * Math.max(0.01, Math.cos(radians(latitude))),
+    y: EARTH_RADIUS_KM * radians(point.latitude - latitude)
+  }
+}
+
+function distanceToWatchSegmentKm(place, first, second) {
+  var a = localWatchPoint(place, first)
+  var b = localWatchPoint(place, second)
+  if (!a || !b) return UNREACHABLE_DISTANCE_KM
+  var dx = b.x - a.x
+  var dy = b.y - a.y
+  var denominator = dx * dx + dy * dy
+  if (denominator < 0.000001) return Math.hypot(a.x, a.y)
+  var projection = clamp(-(a.x * dx + a.y * dy) / denominator, 0, 1)
+  return Math.hypot(a.x + projection * dx, a.y + projection * dy)
+}
+
+function watchPlaceInsideRing(place, ring) {
+  var rows = Array.isArray(ring) ? ring : []
+  if (!place || rows.length < 3 || !validCoordinate(place.latitude, place.longitude)) return false
+  var inside = false
+  var previous = watchCoordinate(rows[rows.length - 1])
+  if (!previous) return false
+  for (var i = 0; i < rows.length; i++) {
+    var current = watchCoordinate(rows[i])
+    if (!current) continue
+    var currentX = longitudeNear(place.longitude, current.longitude) - Number(place.longitude)
+    var previousX = longitudeNear(place.longitude, previous.longitude) - Number(place.longitude)
+    var currentY = current.latitude - Number(place.latitude)
+    var previousY = previous.latitude - Number(place.latitude)
+    if ((currentY > 0) !== (previousY > 0)) {
+      var crossingX = (previousX - currentX) * (-currentY) / (previousY - currentY) + currentX
+      if (crossingX > 0) inside = !inside
+    }
+    previous = current
+  }
+  return inside
+}
+
+function distanceToWatchPathKm(place, coordinates, closed) {
+  var rows = Array.isArray(coordinates) ? coordinates : []
+  if (!place || rows.length === 0 || !validCoordinate(place.latitude, place.longitude))
+    return UNREACHABLE_DISTANCE_KM
+  if (closed && watchPlaceInsideRing(place, rows)) return 0
+  var best = UNREACHABLE_DISTANCE_KM
+  var previous = null
+  var first = null
+  for (var i = 0; i < rows.length; i++) {
+    var current = watchCoordinate(rows[i])
+    if (!current) continue
+    if (!first) first = current
+    best = Math.min(best, haversineDistanceKm(
+      place.latitude, place.longitude, current.latitude, current.longitude))
+    if (previous) best = Math.min(best, distanceToWatchSegmentKm(place, previous, current))
+    previous = current
+  }
+  if (closed && first && previous) best = Math.min(best, distanceToWatchSegmentKm(place, previous, first))
+  return best
+}
+
+function normalizeWatchPlace(place) {
+  if (!place || !validCoordinate(place.latitude, place.longitude)) return null
+  var id = String(place.id || "").replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 64)
+  var name = String(place.name || "").replace(/[\x00-\x1f\x7f]+/g, " ")
+    .replace(/\s+/g, " ").trim().slice(0, 40)
+  if (!id || !name) return null
+  return {
+    id: id,
+    name: name,
+    latitude: Number(Number(place.latitude).toFixed(5)),
+    longitude: Number(wrapLongitude(place.longitude).toFixed(5)),
+    radiusKm: Math.round(clamp(place.radiusKm || 500, 50, 2000))
+  }
+}
+
+function watchPlaceCoverage(place) {
+  var normalized = normalizeWatchPlace(place)
+  if (!normalized) return { supported: false, label: "Location unavailable" }
+  var supported = normalized.latitude >= 0 && normalized.latitude <= 72
+    && normalized.longitude >= -180 && normalized.longitude <= 0
+  return {
+    supported: supported,
+    label: supported ? "NHC source coverage only" : "Outside current NHC source coverage"
+  }
+}
+
+function watchCircleCoordinates(place, requestedSteps) {
+  var normalized = normalizeWatchPlace(place)
+  if (!normalized) return []
+  var steps = Math.round(clamp(requestedSteps || 48, 24, 96))
+  var angularDistance = normalized.radiusKm / EARTH_RADIUS_KM
+  var latitude = radians(normalized.latitude)
+  var longitude = radians(normalized.longitude)
+  var output = []
+  for (var i = 0; i <= steps; i++) {
+    var bearing = Math.PI * 2 * i / steps
+    var destinationLatitude = Math.asin(
+      Math.sin(latitude) * Math.cos(angularDistance)
+      + Math.cos(latitude) * Math.sin(angularDistance) * Math.cos(bearing))
+    var destinationLongitude = longitude + Math.atan2(
+      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitude),
+      Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(destinationLatitude))
+    output.push({
+      latitude: destinationLatitude * 180 / Math.PI,
+      longitude: wrapLongitude(destinationLongitude * 180 / Math.PI)
+    })
+  }
+  return output
+}
+
+function watchPlaceBounds(place) {
+  var normalized = normalizeWatchPlace(place)
+  if (!normalized) return { centreLatitude: 18, centreLongitude: -70, latitudeSpan: 30, longitudeSpan: 55 }
+  var angularSpan = normalized.radiusKm / 111
+  return boundsForCoordinates(
+    watchCircleCoordinates(normalized, 48),
+    normalized.longitude,
+    {
+      centreLatitude: normalized.latitude,
+      centreLongitude: normalized.longitude,
+      latitudeSpan: Math.max(8, angularSpan * 2.4),
+      longitudeSpan: Math.max(12, angularSpan * 2.4)
+    }
+  )
+}
+
+function watchPlaceFocus(place, currentZoom, minimumZoom, maximumZoom) {
+  var normalized = normalizeWatchPlace(place)
+  if (!normalized) return null
+  var minimum = isFinite(Number(minimumZoom)) ? Number(minimumZoom) : 1
+  var maximum = isFinite(Number(maximumZoom)) ? Number(maximumZoom) : Math.max(minimum, 8)
+  if (maximum < minimum) maximum = minimum
+  var current = isFinite(Number(currentZoom)) ? Number(currentZoom) : minimum
+  var comfortable = clamp(2.2, minimum, maximum)
+  return {
+    centreLatitude: clamp(normalized.latitude, -82, 82),
+    centreLongitude: normalized.longitude,
+    zoom: clamp(Math.max(current, comfortable), minimum, maximum)
+  }
+}
+
+function stormWatchProximity(storm, place) {
+  var normalized = normalizeWatchPlace(place)
+  if (!storm || !normalized) return { distanceKm: UNREACHABLE_DISTANCE_KM, source: "", forecastHour: 0 }
+  var best = UNREACHABLE_DISTANCE_KM
+  var source = ""
+  var rings = Array.isArray(storm.cone) ? storm.cone : []
+  for (var r = 0; r < rings.length; r++) {
+    var coneDistance = distanceToWatchPathKm(normalized, rings[r], true)
+    if (coneDistance < best) {
+      best = coneDistance
+      source = "cone"
+    }
+  }
+  var track = Array.isArray(storm.track) ? storm.track : []
+  var trackDistance = distanceToWatchPathKm(normalized, track, false)
+  if (trackDistance < best) {
+    best = trackDistance
+    source = "track"
+  }
+  if (validCoordinate(storm.latitude, storm.longitude)) {
+    var centreDistance = haversineDistanceKm(
+      normalized.latitude, normalized.longitude, storm.latitude, storm.longitude)
+    if (centreDistance < best) {
+      best = centreDistance
+      source = "centre"
+    }
+  }
+  var forecastHour = 0
+  var forecastDistance = UNREACHABLE_DISTANCE_KM
+  for (var i = 0; i < track.length; i++) {
+    if (!watchCoordinate(track[i])) continue
+    var pointDistance = haversineDistanceKm(
+      normalized.latitude, normalized.longitude, track[i].latitude, track[i].longitude)
+    if (pointDistance < forecastDistance) {
+      forecastDistance = pointDistance
+      forecastHour = Math.max(0, Math.round(Number(track[i].forecastHour || 0)))
+    }
+  }
+  return { distanceKm: best, source: source, forecastHour: forecastHour }
+}
+
+function outlookWatchProximity(outlook, place) {
+  var normalized = normalizeWatchPlace(place)
+  if (!outlook || !normalized) return { distanceKm: UNREACHABLE_DISTANCE_KM, source: "" }
+  var best = UNREACHABLE_DISTANCE_KM
+  var source = ""
+  var rings = Array.isArray(outlook.area) ? outlook.area : []
+  for (var r = 0; r < rings.length; r++) {
+    var areaDistance = distanceToWatchPathKm(normalized, rings[r], true)
+    if (areaDistance < best) {
+      best = areaDistance
+      source = "area"
+    }
+  }
+  if (validCoordinate(outlook.latitude, outlook.longitude)) {
+    var markerDistance = haversineDistanceKm(
+      normalized.latitude, normalized.longitude, outlook.latitude, outlook.longitude)
+    if (markerDistance < best) {
+      best = markerDistance
+      source = "marker"
+    }
+  }
+  return { distanceKm: best, source: source }
+}
+
+function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
+  var active = Array.isArray(storms) ? storms : []
+  var developing = Array.isArray(outlooks) ? outlooks : []
+  var watches = Array.isArray(places) ? places : []
+  var threshold = alertThresholdValue(thresholdValue)
+  var output = {}
+  for (var p = 0; p < watches.length; p++) {
+    var place = normalizeWatchPlace(watches[p])
+    if (!place) continue
+    for (var s = 0; s < active.length; s++) {
+      var stormProximity = stormWatchProximity(active[s], place)
+      var stormKey = "place:" + place.id + "|storm:" + String(active[s].id || "")
+      output[stormKey] = {
+        scope: "place", kind: "storm", key: stormKey,
+        placeId: place.id, placeName: place.name, radiusKm: place.radiusKm,
+        name: String(active[s].name || "Unnamed storm"),
+        basin: String(active[s].basin || ""),
+        systemKey: "storm:" + String(active[s].id || ""),
+        label: classificationLabel(active[s]),
+        distanceKm: stormProximity.distanceKm,
+        proximitySource: stormProximity.source,
+        forecastHour: stormProximity.forecastHour,
+        meetsThreshold: stormProximity.distanceKm <= place.radiusKm
+      }
+    }
+    for (var o = 0; o < developing.length; o++) {
+      var outlookProximity = outlookWatchProximity(developing[o], place)
+      var chance = Math.max(0, Math.round(Number(developing[o].sevenDayChance || 0)))
+      var outlookKey = "place:" + place.id + "|outlook:" + String(developing[o].id || "")
+      output[outlookKey] = {
+        scope: "place", kind: "outlook", key: outlookKey,
+        placeId: place.id, placeName: place.name, radiusKm: place.radiusKm,
+        name: String(developing[o].name || developing[o].title || "Developing system"),
+        basin: String(developing[o].basin || ""),
+        systemKey: "outlook:" + String(developing[o].id || ""),
+        label: String(developing[o].classificationLabel || "Developing system"),
+        chance: chance,
+        distanceKm: outlookProximity.distanceKm,
+        proximitySource: outlookProximity.source,
+        meetsThreshold: chance >= threshold && outlookProximity.distanceKm <= place.radiusKm
+      }
+    }
+  }
+  return output
+}
+
+function watchAlertEvents(previous, current) {
+  var before = previous || {}
+  var after = current || {}
+  var events = []
+  for (var key in after) {
+    var item = after[key]
+    var old = before[key]
+    if (item.meetsThreshold && (!old || !old.meetsThreshold)) events.push(item)
+  }
+  return events
+}
+
+function watchDistanceLabel(distanceKm) {
+  var distance = Math.max(0, Math.round(Number(distanceKm || 0)))
+  return distance < 10 ? "at the watch point" : distance + " km away"
+}
+
+function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
+  var watches = Array.isArray(places) ? places : []
+  var snapshot = watchAlertSnapshot(storms, outlooks, watches, thresholdValue)
+  var output = []
+  for (var p = 0; p < watches.length; p++) {
+    var place = normalizeWatchPlace(watches[p])
+    if (!place) continue
+    var selected = null
+    for (var key in snapshot) {
+      var candidate = snapshot[key]
+      if (candidate.placeId !== place.id || !candidate.meetsThreshold) continue
+      if (!selected
+          || (candidate.kind === "storm" && selected.kind !== "storm")
+          || (candidate.kind === selected.kind && candidate.distanceKm < selected.distanceKm))
+        selected = candidate
+    }
+    var coverage = watchPlaceCoverage(place)
+    var summary = {
+      place: place,
+      state: coverage.supported ? "quiet" : "unsupported",
+      status: coverage.supported ? "QUIET" : "LIMITED",
+      detail: coverage.supported
+        ? place.radiusKm + " km watch area · NHC only"
+        : coverage.label,
+      systemKey: "",
+      event: null
+    }
+    if (selected && selected.kind === "storm") {
+      summary.state = "monitor"
+      summary.status = "MONITOR"
+      summary.detail = selected.proximitySource === "cone" && selected.distanceKm < 10
+        ? selected.name + " · forecast cone overlaps watch area"
+        : selected.name + " · forecast " + watchDistanceLabel(selected.distanceKm)
+      summary.systemKey = selected.systemKey
+      summary.event = selected
+    } else if (selected) {
+      summary.state = "heads-up"
+      summary.status = "HEADS-UP"
+      summary.detail = selected.proximitySource === "area" && selected.distanceKm < 10
+        ? selected.name + " · " + selected.chance + "% formation area overlaps watch point"
+        : selected.name + " · " + selected.chance + "% formation · "
+          + watchDistanceLabel(selected.distanceKm)
+      summary.systemKey = selected.systemKey
+      summary.event = selected
+    }
+    output.push(summary)
+  }
+  return output
+}
+
 function alertRegionCode(value) {
   var normalized = String(value || "").toLowerCase()
   if (normalized === "atlantic") return "al"

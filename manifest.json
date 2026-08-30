@@ -52,10 +52,10 @@
       {
         "key": "alertRegion",
         "type": "enum",
-        "label": "Regional alerts",
+        "label": "Basin alerts",
         "options": ["Off", "Atlantic", "Eastern Pacific", "Central Pacific", "All NHC basins"],
         "defaultValue": "Off",
-        "description": "Notify when an NHC outlook reaches your threshold in this region. Existing systems are used as a quiet baseline when alerts are enabled."
+        "description": "Notify when an NHC outlook reaches your threshold anywhere in this source basin. Add location-specific proximity alerts from the app's Alerts view. Existing systems form a quiet baseline."
       },
       {
         "key": "formationThreshold",
@@ -63,7 +63,7 @@
         "label": "Formation threshold",
         "options": ["Low (20%)", "Medium (40%)", "High (70%)"],
         "defaultValue": "Medium (40%)",
-        "description": "Minimum seven-day tropical cyclone formation chance for a developing-system notification."
+        "description": "Minimum seven-day tropical cyclone formation chance for basin and nearby-place notifications."
       },
       {
         "key": "notifyNamedStorms",

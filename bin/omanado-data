@@ -49,8 +49,10 @@ MAX_KMZ_BYTES = 10_000_000
 MAX_KML_BYTES = 18_000_000
 MAX_TEXT_BYTES = 750_000
 MAX_CACHE_BYTES = 8_000_000
+MAX_WATCH_CONFIG_BYTES = 64_000
 MAX_STORMS = 20
 MAX_OUTLOOKS = 24
+MAX_WATCH_PLACES = 12
 MAX_TRACK_POINTS = 40
 MAX_PAST_POINTS = 256
 MAX_CONE_POINTS = 420
@@ -97,6 +99,15 @@ def cache_path() -> Path:
         )
     )
     return root / "omanado" / "storms.json"
+
+
+def watch_config_path() -> Path:
+    root = Path(
+        os.environ.get(
+            "XDG_CONFIG_HOME", str(Path(os.environ.get("HOME", ".")) / ".config")
+        )
+    )
+    return root / "omanado" / "watch-places.json"
 
 
 def safe_text(value: Any, limit: int = 160) -> str:
@@ -858,6 +869,87 @@ def write_cache(payload: dict[str, Any], path: Path | None = None) -> None:
                 pass
 
 
+def normalized_watch_place(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    identifier = re.sub(r"[^a-zA-Z0-9_-]+", "", str(value.get("id") or ""))[:64]
+    name = safe_text(value.get("name"), 40)
+    latitude = number(value.get("latitude"))
+    longitude = number(value.get("longitude"))
+    radius = number(value.get("radiusKm"), 500)
+    if (
+        not identifier
+        or not name
+        or latitude is None
+        or longitude is None
+        or not -90 <= latitude <= 90
+        or not -180 <= longitude <= 180
+    ):
+        return None
+    return {
+        "id": identifier,
+        "name": name,
+        "latitude": round(latitude, 5),
+        "longitude": round(longitude, 5),
+        "radiusKm": round(max(50, min(2000, radius or 500))),
+    }
+
+
+def normalize_watch_config(value: Any) -> dict[str, Any]:
+    source = value.get("places", []) if isinstance(value, dict) else []
+    rows = source if isinstance(source, list) else []
+    places = []
+    identifiers: set[str] = set()
+    for row in rows:
+        place = normalized_watch_place(row)
+        if place is None or place["id"] in identifiers:
+            continue
+        identifiers.add(place["id"])
+        places.append(place)
+        if len(places) >= MAX_WATCH_PLACES:
+            break
+    return {"schemaVersion": 1, "places": places}
+
+
+def read_watch_config(path: Path | None = None) -> dict[str, Any]:
+    target = path or watch_config_path()
+    try:
+        if not target.is_file() or target.stat().st_size > MAX_WATCH_CONFIG_BYTES:
+            return normalize_watch_config({})
+        parsed = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return normalize_watch_config({})
+    return normalize_watch_config(parsed)
+
+
+def write_watch_config(value: Any, path: Path | None = None) -> dict[str, Any]:
+    target = path or watch_config_path()
+    payload = normalize_watch_config(value)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_WATCH_CONFIG_BYTES:
+        raise DataError("watch-place settings exceeded the size limit")
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent,
+            prefix=".watch-places.", delete=False
+        ) as temporary:
+            temporary_name = temporary.name
+            os.chmod(temporary_name, 0o600)
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, target)
+    finally:
+        if temporary_name:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+    return payload
+
+
 def unavailable_payload(message: str, cached: dict[str, Any] | None = None) -> dict[str, Any]:
     if cached:
         payload = copy.deepcopy(cached)
@@ -908,11 +1000,27 @@ def main(argv: Iterable[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("fetch", help="Fetch live NHC data, falling back to the local cache")
     subparsers.add_parser("cache", help="Print the last cached response without using the network")
+    subparsers.add_parser("watch-load", help="Print locally saved watch places")
+    watch_save = subparsers.add_parser("watch-save", help="Validate and save watch places locally")
+    watch_save.add_argument("payload", help="JSON watch-place payload")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "fetch":
         emit(fetch_with_fallback())
         return 0
+
+    if args.command == "watch-load":
+        emit(read_watch_config())
+        return 0
+
+    if args.command == "watch-save":
+        try:
+            requested = json.loads(args.payload)
+            emit(write_watch_config(requested))
+            return 0
+        except (json.JSONDecodeError, OSError, DataError) as error:
+            print(f"omanado-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
 
     cached = read_cache()
     if cached:

@@ -118,6 +118,54 @@ const developing = { ...outlook, sevenDayChance: 40 }
 const developingSnapshot = model.alertSnapshot([], [developing], "Atlantic", "Medium (40%)", true)
 assert.equal(model.alertEvents(quietSnapshot, developingSnapshot)[0].name, "Dolly")
 
+const home = {
+  id: "home",
+  name: "Home",
+  latitude: 27.5,
+  longitude: -78.5,
+  radiusKm: 250
+}
+const focusedPlace = model.watchPlaceFocus(home, 4.25, 1, 8)
+assert.equal(focusedPlace.centreLatitude, home.latitude)
+assert.equal(focusedPlace.centreLongitude, home.longitude)
+assert.equal(focusedPlace.zoom, 4.25)
+assert.equal(model.watchPlaceFocus(home, 1.1, 1, 8).zoom, 2.2)
+assert.deepEqual(
+  { ...model.normalizeWatchPlace({ ...home, name: "  Home\nbase  ", radiusKm: 9999 }) },
+  { ...home, name: "Home base", radiusKm: 2000 }
+)
+assert.ok(model.haversineDistanceKm(25.7617, -80.1918, 27.9506, -82.4572) > 250)
+assert.ok(model.haversineDistanceKm(25.7617, -80.1918, 27.9506, -82.4572) < 400)
+const watchCircle = model.watchCircleCoordinates(home, 32)
+assert.equal(watchCircle.length, 33)
+assert.ok(Math.abs(model.haversineDistanceKm(
+  home.latitude, home.longitude, watchCircle[0].latitude, watchCircle[0].longitude
+) - home.radiusKm) < 1)
+assert.equal(model.watchPlaceCoverage(home).supported, true)
+assert.equal(model.watchPlaceCoverage({ ...home, longitude: 139.69 }).supported, false)
+
+const stormProximity = model.stormWatchProximity(storm, home)
+assert.equal(stormProximity.distanceKm, 0)
+assert.equal(stormProximity.source, "cone")
+const placeSnapshot = model.watchAlertSnapshot([storm], [], [home], "Medium (40%)")
+assert.equal(placeSnapshot["place:home|storm:al012026"].meetsThreshold, true)
+assert.equal(model.watchAlertEvents({}, placeSnapshot)[0].placeName, "Home")
+assert.equal(model.watchAlertEvents(placeSnapshot, placeSnapshot).length, 0)
+assert.equal(model.watchPlaceSummaries([storm], [], [home], "Medium (40%)")[0].state, "monitor")
+
+const family = {
+  id: "family",
+  name: "Family",
+  latitude: 23,
+  longitude: -71,
+  radiusKm: 100
+}
+const formationSnapshot = model.watchAlertSnapshot([], [developing], [family], "Medium (40%)")
+assert.equal(formationSnapshot["place:family|outlook:al-outlook-1"].meetsThreshold, true)
+assert.equal(model.watchPlaceSummaries([], [developing], [family], "Medium (40%)")[0].state, "heads-up")
+const lowFormationSnapshot = model.watchAlertSnapshot([], [outlook], [family], "Medium (40%)")
+assert.equal(model.watchAlertEvents(lowFormationSnapshot, formationSnapshot).length, 1)
+
 assert.equal(model.safeOfficialUrl("https://www.nhc.noaa.gov/text/MIATCPAT1.shtml").length > 0, true)
 assert.equal(model.safeOfficialUrl("http://www.nhc.noaa.gov/text"), "")
 assert.equal(model.safeOfficialUrl("https://nhc.noaa.gov.attacker.example/text"), "")

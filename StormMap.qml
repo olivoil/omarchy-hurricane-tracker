@@ -7,7 +7,12 @@ Item {
 
   property var storms: []
   property var outlooks: []
+  property var watchPlaces: []
   property string selectedKey: ""
+  property string selectedPlaceId: ""
+  property bool autoFitSelection: true
+  property bool placementMode: false
+  property var draftWatchPlace: null
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property bool selectedIsStorm: selectedSystem && selectedSystem.kind === "storm"
@@ -41,6 +46,7 @@ Item {
 
   property var countries: []
   property string hoveredKey: ""
+  property string hoveredPlaceId: ""
   property var hoveredPoint: null
   property real hoverX: 0
   property real hoverY: 0
@@ -48,10 +54,14 @@ Item {
   property string hoverDetail: ""
 
   signal systemActivated(string key)
+  signal placeActivated(string identifier)
+  signal placePicked(real latitude, real longitude)
   signal pointerActivity()
 
   Accessible.name: "NHC tropical systems map"
-  Accessible.description: "Drag to pan or rotate the globe, use the wheel to zoom, and select a cyclone or outlook marker"
+  Accessible.description: placementMode
+    ? "Click the map to place a watch point, drag to pan, or use the wheel to zoom"
+    : "Drag to pan or rotate the globe, use the wheel to zoom, and select a cyclone, outlook, or watched-location marker"
   Accessible.role: Accessible.Pane
 
   function coordinateLatitude(value) {
@@ -115,6 +125,37 @@ Item {
     )
   }
 
+  function fitWatchPlace(place) {
+    var normalized = Model.normalizeWatchPlace(place)
+    if (width < 40 || height < 40 || !normalized) return
+    applyBounds(
+      Model.watchPlaceBounds(normalized),
+      Model.watchCircleCoordinates(normalized, 48),
+      1.35
+    )
+  }
+
+  function focusWatchPlace(place) {
+    if (width < 40 || height < 40) return
+    var focus = Model.watchPlaceFocus(place, zoom, minimumZoom, maximumZoom)
+    if (!focus) return
+    centreLatitude = focus.centreLatitude
+    centreLongitude = focus.centreLongitude
+    zoom = focus.zoom
+    userMoved = true
+    clearHover()
+    canvas.requestPaint()
+  }
+
+  function scheduleFitSelected(force) {
+    var forceFit = force === true
+    if (!autoFitSelection || (!forceFit && userMoved)) return
+    Qt.callLater(function() {
+      if (!root.autoFitSelection || (!forceFit && root.userMoved)) return
+      root.fitSelected()
+    })
+  }
+
   function showGlobe(basin) {
     if (basin) {
       var bounds = Model.regionBounds(storms, outlooks, basin)
@@ -163,6 +204,7 @@ Item {
 
   function clearHover() {
     hoveredKey = ""
+    hoveredPlaceId = ""
     hoveredPoint = null
     hoverTitle = ""
     hoverDetail = ""
@@ -180,6 +222,24 @@ Item {
       if (distance <= bestDistance) {
         bestDistance = distance
         best = system
+      }
+    }
+    return best
+  }
+
+  function nearestWatchPlace(x, y, radius) {
+    var rows = Array.isArray(watchPlaces) ? watchPlaces : []
+    var best = null
+    var bestDistance = radius
+    for (var i = 0; i < rows.length; i++) {
+      var place = Model.normalizeWatchPlace(rows[i])
+      if (!place) continue
+      var point = project(place.latitude, place.longitude)
+      if (!point.visible) continue
+      var distance = Math.hypot(point.x - x, point.y - y)
+      if (distance <= bestDistance) {
+        bestDistance = distance
+        best = place
       }
     }
     return best
@@ -216,12 +276,15 @@ Item {
     var system = nearestSystem(x, y, 22)
     hoveredPoint = null
     hoveredKey = system ? system.key : ""
+    hoveredPlaceId = ""
     if (system) {
       hoverTitle = String(system.name || system.title || "Tropical system")
       hoverDetail = Model.systemClassificationLabel(system) + " · " + Model.systemMetric(system)
     } else {
-      hoverTitle = ""
-      hoverDetail = ""
+      var place = nearestWatchPlace(x, y, 16)
+      hoveredPlaceId = place ? place.id : ""
+      hoverTitle = place ? place.name : ""
+      hoverDetail = place ? "Saved alert destination · NHC coverage" : ""
     }
     canvas.requestPaint()
   }
@@ -368,6 +431,48 @@ Item {
       var point = project(properties.labelLatitude, properties.labelLongitude)
       if (!point.visible || point.x < 20 || point.x > width - 20 || point.y < 20 || point.y > height - 20) continue
       context.fillText(String(properties.name || "").toUpperCase(), point.x, point.y)
+    }
+  }
+
+  function drawWatchPlace(context, requested, draft) {
+    var place = Model.normalizeWatchPlace(requested)
+    if (!place) return
+    var selected = draft || place.id === selectedPlaceId
+    var hovered = place.id === hoveredPlaceId
+    if (draft) {
+      var ring = Model.watchCircleCoordinates(place, zoom < 2 ? 36 : 64)
+      context.strokeStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.82)
+      context.fillStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.055)
+      context.lineWidth = 1.6
+      if (context.setLineDash) context.setLineDash([3, 4])
+      if (beginGeoPath(context, ring, true)) {
+        context.fill()
+        context.stroke()
+      }
+      if (context.setLineDash) context.setLineDash([])
+    }
+
+    var point = project(place.latitude, place.longitude)
+    if (!point.visible || point.x < -50 || point.x > width + 50
+        || point.y < -50 || point.y > height + 50) return
+    var radius = selected || hovered ? 6 : 4.5
+    context.fillStyle = surfaceColor
+    context.strokeStyle = selected || hovered ? coneColor : mutedTextColor
+    context.lineWidth = selected ? 2 : 1.4
+    context.beginPath()
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+    context.fillStyle = selected || hovered ? coneColor : mutedTextColor
+    context.beginPath()
+    context.arc(point.x, point.y, 1.8, 0, Math.PI * 2)
+    context.fill()
+    if (selected || hovered || zoom >= 2.2) {
+      context.textAlign = "left"
+      context.textBaseline = "middle"
+      context.font = "700 " + (selected ? 11 : 9) + "px '" + fontFamily + "'"
+      context.fillStyle = selected ? textColor : mutedTextColor
+      context.fillText(String(place.name || "WATCH PLACE").toUpperCase(), point.x + radius + 7, point.y)
     }
   }
 
@@ -523,6 +628,12 @@ Item {
     drawGrid(context)
     drawCountries(context)
     drawCountryLabels(context)
+    var draftId = draftWatchPlace ? String(draftWatchPlace.id || "") : ""
+    for (var w = 0; w < watchPlaces.length; w++) {
+      if (draftId && String(watchPlaces[w] && watchPlaces[w].id || "") === draftId) continue
+      drawWatchPlace(context, watchPlaces[w], false)
+    }
+    if (draftWatchPlace) drawWatchPlace(context, draftWatchPlace, true)
     for (var o = 0; o < systems.length; o++) if (systems[o].kind === "outlook") drawOutlook(context, systems[o])
     if (selectedIsStorm) {
       drawCone(context, selectedSystem)
@@ -566,8 +677,10 @@ Item {
     anchors.fill: parent
     hoverEnabled: true
     acceptedButtons: Qt.LeftButton
-    cursorShape: pressed ? Qt.ClosedHandCursor
-      : (root.hoveredKey !== "" || root.hoveredPoint ? Qt.PointingHandCursor : Qt.OpenHandCursor)
+    cursorShape: root.placementMode ? Qt.CrossCursor
+      : (pressed ? Qt.ClosedHandCursor
+        : (root.hoveredKey !== "" || root.hoveredPlaceId !== "" || root.hoveredPoint
+          ? Qt.PointingHandCursor : Qt.OpenHandCursor))
     property real previousX: 0
     property real previousY: 0
     property real travel: 0
@@ -600,10 +713,17 @@ Item {
     }
     onReleased: function(mouse) {
       if (travel < 7) {
-        var system = root.nearestSystem(mouse.x, mouse.y, 25)
-        if (system) root.systemActivated(system.key)
+        if (root.placementMode) {
+          var coordinate = root.unproject(mouse.x, mouse.y)
+          if (coordinate) root.placePicked(coordinate.latitude, coordinate.longitude)
+        } else {
+          var system = root.nearestSystem(mouse.x, mouse.y, 25)
+          var place = system ? null : root.nearestWatchPlace(mouse.x, mouse.y, 18)
+          if (system) root.systemActivated(system.key)
+          else if (place) root.placeActivated(place.id)
+        }
       }
-      root.updateHover(mouse.x, mouse.y)
+      if (!root.placementMode) root.updateHover(mouse.x, mouse.y)
     }
     onExited: {
       if (!pressed) root.clearHover()
@@ -682,15 +802,22 @@ Item {
 
   onStormsChanged: canvas.requestPaint()
   onOutlooksChanged: canvas.requestPaint()
-  onSelectedKeyChanged: Qt.callLater(root.fitSelected)
+  onWatchPlacesChanged: canvas.requestPaint()
+  onSelectedKeyChanged: scheduleFitSelected(true)
+  onSelectedPlaceIdChanged: canvas.requestPaint()
+  onDraftWatchPlaceChanged: canvas.requestPaint()
+  onPlacementModeChanged: {
+    clearHover()
+    canvas.requestPaint()
+  }
   onCentreLatitudeChanged: canvas.requestPaint()
   onCentreLongitudeChanged: canvas.requestPaint()
   onZoomChanged: canvas.requestPaint()
-  onWidthChanged: if (!userMoved) Qt.callLater(root.fitSelected)
-  onHeightChanged: if (!userMoved) Qt.callLater(root.fitSelected)
-  onBottomInsetChanged: if (!userMoved) Qt.callLater(root.fitSelected)
+  onWidthChanged: scheduleFitSelected(false)
+  onHeightChanged: scheduleFitSelected(false)
+  onBottomInsetChanged: scheduleFitSelected(false)
   onOceanColorChanged: canvas.requestPaint()
   onLandColorChanged: canvas.requestPaint()
   onConeColorChanged: canvas.requestPaint()
-  Component.onCompleted: Qt.callLater(root.fitSelected)
+  Component.onCompleted: scheduleFitSelected(true)
 }

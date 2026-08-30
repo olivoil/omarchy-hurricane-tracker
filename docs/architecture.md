@@ -13,10 +13,16 @@ Omanado.qml ───┘                         └─ user cache
 
 `Service.qml` is mounted once by the Omarchy shell. It owns refresh scheduling,
 starts the helper process, validates the normalized payload, and exposes the
-same cyclone, outlook, and region arrays to every bar instance and the overlay.
-It also maintains a session-local alert baseline and sends at most one
-region-scoped notification for a refresh. This avoids one network poll per
-monitor and avoids startup notification floods.
+same cyclone, outlook, region, and watch-place arrays to every bar instance and
+the overlay. It maintains separate session-local baselines for basin and
+place-proximity alerts, then sends at most one grouped notification for a
+refresh. This avoids one network poll per monitor and avoids startup
+notification floods.
+
+Watch places are a versioned local configuration, not part of the public NHC
+payload. The helper validates at most 12 named coordinates with bounded radii
+and atomically writes them with user-only permissions under the XDG config
+directory. Saving coordinates never makes a network request.
 
 `BarWidget.qml` stays deliberately small. It shows whether any systems are
 active, forwards settings to the shared service, and opens the overlay through
@@ -35,6 +41,7 @@ the shell's normal plugin IPC route.
    structure, invalid coordinates, and malformed XML or JSON.
 5. Normalizes the source documents into a versioned JSON contract.
 6. Atomically writes a private cache and marks fallback data as stale.
+7. Validates and privately persists the separate watch-place configuration.
 
 Remote text is normalized before it reaches QML. Browser actions are checked
 again against the NHC hostname allowlist in `Model.js` before launch.
@@ -54,6 +61,14 @@ after the bundled Natural Earth geometry has loaded. It draws:
 - current markers for every active system.
 - NHC formation areas and probability markers for developing and remnant
   systems.
+- subtle user-defined watch points and geodesic radius rings.
+
+Place relevance is calculated locally. Formation areas trigger only after the
+configured seven-day probability threshold is met and their geometry enters a
+watch radius. Active cyclones trigger when the official center track or cone of
+uncertainty enters a radius. The UI and notification copy call these
+"heads-up" and "monitor" states rather than estimating an unsupported local
+impact probability.
 
 Shell chrome, land, ocean, grid, track, and cone colors are derived from the
 active Omarchy menu background, foreground, and accent. Storm intensity and

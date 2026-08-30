@@ -193,6 +193,53 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(omanado.read_cache(path), payload)
 
+    def test_watch_places_are_sanitized_private_and_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config" / "watch-places.json"
+            requested = {
+                "schemaVersion": 99,
+                "places": [
+                    {
+                        "id": "home!",
+                        "name": "  Home\nbase  ",
+                        "latitude": 21.1619,
+                        "longitude": -86.8515,
+                        "radiusKm": 9000,
+                    },
+                    {
+                        "id": "home",
+                        "name": "Duplicate",
+                        "latitude": 20,
+                        "longitude": -80,
+                        "radiusKm": 100,
+                    },
+                    {
+                        "id": "invalid",
+                        "name": "Invalid",
+                        "latitude": 120,
+                        "longitude": 0,
+                    },
+                ]
+                + [
+                    {
+                        "id": f"place-{index}",
+                        "name": f"Place {index}",
+                        "latitude": 10 + index,
+                        "longitude": -70,
+                        "radiusKm": 250,
+                    }
+                    for index in range(20)
+                ],
+            }
+            saved = omanado.write_watch_config(requested, path)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(saved["schemaVersion"], 1)
+            self.assertEqual(len(saved["places"]), omanado.MAX_WATCH_PLACES)
+            self.assertEqual(saved["places"][0]["id"], "home")
+            self.assertEqual(saved["places"][0]["name"], "Home base")
+            self.assertEqual(saved["places"][0]["radiusKm"], 2000)
+            self.assertEqual(omanado.read_watch_config(path), saved)
+
 
 if __name__ == "__main__":
     unittest.main()

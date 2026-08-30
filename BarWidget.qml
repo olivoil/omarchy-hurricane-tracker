@@ -8,8 +8,10 @@ BarWidget {
   id: root
   moduleName: "io.github.olivoil.hurricane-tracker"
 
+  readonly property string pluginId: root.moduleName
+    || "io.github.olivoil.hurricane-tracker"
   readonly property var tracker: bar && bar.shell
-    ? bar.shell.serviceFor("io.github.olivoil.hurricane-tracker") : null
+    ? bar.shell.serviceFor(pluginId) : null
   readonly property int activeCount: tracker ? tracker.activeCount : 0
   readonly property int trackingCount: tracker ? tracker.trackingCount : 0
   readonly property var strongestStorm: activeCount > 0 ? tracker.storms[0] : null
@@ -25,6 +27,8 @@ BarWidget {
   function tooltip() {
     if (!tracker || (!tracker.hasLoaded && tracker.loading)) return "Hurricane Tracker is checking the National Hurricane Center"
     var summary = Model.trackingSummary(tracker.storms, tracker.outlooks)
+    if (tracker.watchPlaceCount > 0) summary += " · " + tracker.watchPlaceCount
+      + (tracker.watchPlaceCount === 1 ? " watched location" : " watched locations")
     if (tracker.stale) summary = "Saved advisory: " + summary
     return summary + "  ·  left open  ·  middle refresh  ·  right NHC"
   }
@@ -82,7 +86,7 @@ BarWidget {
       } else if (mouseButton === Qt.RightButton) {
         Quickshell.execDetached(["omarchy-launch-browser", "https://www.nhc.noaa.gov/"])
       } else {
-        root.bar.run("omarchy-shell shell toggle io.github.olivoil.hurricane-tracker")
+        root.bar.run("omarchy-shell shell toggle " + root.pluginId)
       }
     }
   }

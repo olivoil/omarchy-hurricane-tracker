@@ -44,6 +44,37 @@ class PluginContractTests(unittest.TestCase):
         )
         self.assertLess(point_count, 12000)
 
+    def test_deferred_system_fit_cannot_override_place_focus(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        self.assertIn("function scheduleFitSelected(force)", storm_map)
+        self.assertIn("if (!root.autoFitSelection", storm_map)
+        self.assertNotIn("onSelectedKeyChanged: if (autoFitSelection)", storm_map)
+
+    def test_navigation_shell_keeps_alerts_global_and_trackers_extensible(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        self.assertIn('property bool trackerMenuOpen: false', overlay)
+        self.assertIn('readonly property var trackerDefinitions:', overlay)
+        self.assertIn('title: "HURRICANE TRACKER"', overlay)
+        self.assertIn('title: "EARTHQUAKE TRACKER"', overlay)
+        self.assertIn('id: alertsButton', overlay)
+        self.assertIn('anchors.right: closeButton.left', overlay)
+        self.assertIn('id: trackerMenuPanel', overlay)
+        self.assertIn('id: dataFooter', overlay)
+        self.assertIn('readonly property var regionalRows: Model.regionalRows(storms, outlooks)', overlay)
+        self.assertNotIn('Model.disclosedRegionalRows(', overlay)
+        self.assertNotIn('function toggleRegion(', overlay)
+        self.assertNotIn('text: "Systems"', overlay)
+        self.assertNotIn('text: "Places"', overlay)
+        self.assertNotIn('text: "OMANADO"', overlay)
+        self.assertIn('stormMap.focusWatchPlace(place)', overlay)
+
+    def test_plugin_id_is_injected_for_parallel_preview_installs(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        bar_widget = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
+        self.assertIn('shell.serviceFor(pluginId)', overlay)
+        self.assertIn('bar.shell.serviceFor(pluginId)', bar_widget)
+        self.assertIn('shell toggle " + root.pluginId', bar_widget)
+
 
 if __name__ == "__main__":
     unittest.main()
