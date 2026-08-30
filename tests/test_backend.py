@@ -111,6 +111,10 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(outlook["basinLabel"], "Atlantic")
         self.assertEqual(outlook["sevenDayChance"], 10)
         self.assertEqual(len(outlook["area"]), 1)
+        self.assertGreaterEqual(len(outlook["connector"]), 2)
+        self.assertEqual(outlook["connector"][0], [-51.7, 16.3])
+        self.assertEqual(outlook["connector"][-1], [-67.0, 19.0])
+        self.assertLessEqual(len(outlook["connector"]), omanado.MAX_CONNECTOR_POINTS)
         self.assertEqual(outlook["updatedAt"], "2026-08-28T23:39:08Z")
 
     def test_forecast_discussion_extracts_narrative_and_forecaster(self):

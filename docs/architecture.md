@@ -79,8 +79,8 @@ after the bundled Natural Earth geometry has loaded. It draws:
 - a dashed preliminary past center track;
 - the solid official forecast center track and forecast intensity points;
 - current markers for every active system.
-- NHC formation areas and probability markers for developing and remnant
-  systems.
+- NHC formation areas, probability markers, and directional connectors from a
+  disturbance's current position toward its potential formation area.
 - subtle user-defined watch points and geodesic radius rings.
 
 Place relevance is calculated locally. Formation areas trigger only after the
@@ -106,7 +106,10 @@ region summaries, a maximum of 20 cyclones, and a maximum of 24 outlook areas.
 Each cyclone contains the current summary, a discussion excerpt, and bounded
 arrays named `pastTrack`, `track`, and `cone`. Each outlook contains NHC's
 two-day and seven-day probabilities, discussion excerpt, marker, and bounded
-formation polygons. Partial detail failure leaves the current cyclone visible
+formation polygons. When NHC publishes one, an outlook also contains a bounded
+`connector` from its current marker toward that area. The connector is
+presentation-only; alert proximity continues to use the marker and official
+formation polygon. Partial detail failure leaves the current cyclone visible
 and adds a `dataWarnings` entry rather than dropping the whole advisory. Failed
 outlook products are listed in `incompleteOutlookBasins`; available data stays
 visible and the UI reports a partial feed. For entries tied to a failed outlook

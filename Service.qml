@@ -80,6 +80,8 @@ Item {
   readonly property var incompleteOutlookBasins: payload
     && Array.isArray(payload.incompleteOutlookBasins) ? payload.incompleteOutlookBasins : []
   readonly property bool outlookDataComplete: incompleteOutlookBasins.length === 0
+  readonly property var incompleteForecastSystemKeys:
+    Model.incompleteForecastSystemKeys(storms)
   readonly property int watchPlaceCount: Array.isArray(watchPlaces) ? watchPlaces.length : 0
   readonly property int refreshMinutes: Math.max(5, Math.min(60, Number(setting("refreshMinutes", 15)) || 15))
   readonly property int retryMultiplier: Math.min(4, Math.pow(2, Math.min(consecutiveFailures, 2)))
@@ -94,6 +96,13 @@ Item {
   readonly property string placeAlertConfigKey: formationThreshold + "|" + JSON.stringify(watchPlaces)
   readonly property bool alertsEnabled: Model.alertRegionCode(alertRegion) !== ""
   readonly property bool placeAlertsEnabled: watchPlacesLoaded && watchPlaceCount > 0
+  readonly property var watchPlaceSummaries: Model.watchPlaceSummaries(
+    storms, outlooks, watchPlaces, formationThreshold, useImperial,
+    ({
+      snapshot: placeAlertsArmed ? placeAlertBaseline : null,
+      incompleteOutlookBasins: incompleteOutlookBasins,
+      incompleteSystemKeys: incompleteForecastSystemKeys
+    }))
   readonly property string alertStatus: alertsEnabled
     ? alertRegion + " · " + Model.alertThresholdValue(formationThreshold) + "%+"
     : "Off"
@@ -464,7 +473,7 @@ Item {
       return
     }
     var events = []
-    var incompleteForecastKeys = Model.incompleteForecastSystemKeys(storms)
+    var incompleteForecastKeys = root.incompleteForecastSystemKeys
     if (alertsEnabled) {
       var current = currentAlertSnapshot()
       if (!alertsArmed || appliedAlertConfig !== alertConfigKey) {

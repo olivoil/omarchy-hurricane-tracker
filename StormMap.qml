@@ -535,6 +535,40 @@ Item {
     }
   }
 
+  function drawOutlookConnector(context, outlook, color, selected) {
+    var rows = outlook && Array.isArray(outlook.connector) ? outlook.connector : []
+    if (rows.length < 2) return
+
+    var lineColor = Qt.rgba(color.r, color.g, color.b, selected ? 0.96 : 0.76)
+    drawPath(context, rows, lineColor, selected ? 2.5 : 1.8, false)
+
+    var previous = rows[rows.length - 2]
+    var last = rows[rows.length - 1]
+    var previousLongitude = Model.longitudeNear(
+      centreLongitude, coordinateLongitude(previous))
+    var lastLongitude = Model.longitudeNear(
+      previousLongitude, coordinateLongitude(last))
+    var previousPoint = projectUnwrapped(coordinateLatitude(previous), previousLongitude)
+    var lastPoint = projectUnwrapped(coordinateLatitude(last), lastLongitude)
+    if (!previousPoint.visible || !lastPoint.visible) return
+
+    var dx = lastPoint.x - previousPoint.x
+    var dy = lastPoint.y - previousPoint.y
+    if (Math.sqrt(dx * dx + dy * dy) < 4) return
+    var arrowSize = selected ? 9 : 7
+    context.save()
+    context.translate(lastPoint.x, lastPoint.y)
+    context.rotate(Math.atan2(dy, dx))
+    context.fillStyle = lineColor
+    context.beginPath()
+    context.moveTo(0, 0)
+    context.lineTo(-arrowSize, -arrowSize * 0.52)
+    context.lineTo(-arrowSize, arrowSize * 0.52)
+    context.closePath()
+    context.fill()
+    context.restore()
+  }
+
   function drawOutlook(context, outlook) {
     var selected = outlook.key === selectedKey
     var hovered = outlook.key === hoveredKey
@@ -550,6 +584,7 @@ Item {
       context.stroke()
     }
     if (context.setLineDash) context.setLineDash([])
+    drawOutlookConnector(context, outlook, color, selected)
 
     var point = project(outlook.latitude, outlook.longitude)
     if (!point.visible) return

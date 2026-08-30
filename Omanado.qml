@@ -69,9 +69,8 @@ Item {
       === draftPlaceSearchQuery.replace(/\s+/g, " ").trim()
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var regionalRows: Model.regionalRows(storms, outlooks)
-  readonly property var watchPlaceSummaries: Model.watchPlaceSummaries(
-    storms, outlooks, watchPlaces,
-    tracker ? tracker.formationThreshold : "Medium (40%)", useImperial)
+  readonly property var watchPlaceSummaries: tracker
+    && Array.isArray(tracker.watchPlaceSummaries) ? tracker.watchPlaceSummaries : []
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property var selectedStorm: selectedSystem && selectedSystem.kind === "storm" ? selectedSystem : null
   readonly property var selectedOutlook: selectedSystem && selectedSystem.kind === "outlook" ? selectedSystem : null
@@ -645,6 +644,7 @@ Item {
     if (summary.state === "urgent") return root.urgent
     if (summary.state === "monitor") return "#e9be62"
     if (summary.state === "heads-up") return root.accent
+    if (summary.state === "limited") return "#e9be62"
     return dim
   }
 
@@ -2943,12 +2943,14 @@ Item {
                       width: Style.space(5)
                       height: width
                       radius: width / 2
-                      color: summary.event ? root.placeStateColor(summary) : root.accent
+                      color: summary.event || summary.state === "limited"
+                        ? root.placeStateColor(summary) : root.accent
                     }
                     Text {
                       anchors.verticalCenter: parent.verticalCenter
                       width: parent.width - Style.space(11)
-                      text: summary.event ? String(summary.detail || "")
+                      text: summary.event || summary.state === "limited"
+                        ? String(summary.detail || "")
                         : root.watchPlaceRuleLabel(place)
                       textFormat: Text.PlainText
                       color: root.foreground

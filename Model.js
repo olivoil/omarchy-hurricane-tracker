@@ -32,6 +32,11 @@ function outlookCoordinates(outlook) {
   var output = []
   if (!outlook) return output
   pushCoordinate(output, outlook)
+  var connector = Array.isArray(outlook.connector) ? outlook.connector : []
+  for (var c = 0; c < connector.length; c++) {
+    if (!Array.isArray(connector[c]) || connector[c].length < 2) continue
+    pushCoordinate(output, { longitude: connector[c][0], latitude: connector[c][1] })
+  }
   var rings = Array.isArray(outlook.area) ? outlook.area : []
   for (var r = 0; r < rings.length; r++) {
     var ring = Array.isArray(rings[r]) ? rings[r] : []
@@ -761,6 +766,14 @@ function watchUnsupportedCount(summaries) {
   return count
 }
 
+function watchDataLimitedCount(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  var count = 0
+  for (var i = 0; i < rows.length; i++)
+    if (rows[i] && rows[i].dataLimited === true) count++
+  return count
+}
+
 function watchStrongestAttentionState(summaries) {
   var rows = Array.isArray(summaries) ? summaries : []
   var strongest = ""
@@ -966,9 +979,19 @@ function watchForecastLeadHours(event) {
   return event.attentionLevel === "urgent" || event.proximitySource === "track" ? hours : 0
 }
 
-function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperial) {
+function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperial,
+    alertContext) {
   var watches = Array.isArray(places) ? places : []
-  var snapshot = watchAlertSnapshot(storms, outlooks, watches, thresholdValue)
+  var context = alertContext && typeof alertContext === "object" ? alertContext : ({})
+  var snapshot = context.snapshot && typeof context.snapshot === "object"
+    ? context.snapshot : watchAlertSnapshot(storms, outlooks, watches, thresholdValue)
+  var incompleteOutlookRows = Array.isArray(context.incompleteOutlookBasins)
+    ? context.incompleteOutlookBasins : []
+  var incompleteSystemRows = Array.isArray(context.incompleteSystemKeys)
+    ? context.incompleteSystemKeys : []
+  var incompleteOutlooks = stringSet(incompleteOutlookRows)
+  var incompleteSystems = stringSet(incompleteSystemRows)
+  var dataIncomplete = incompleteOutlookRows.length > 0 || incompleteSystemRows.length > 0
   var output = []
   for (var p = 0; p < watches.length; p++) {
     var place = normalizeWatchPlace(watches[p])
@@ -991,8 +1014,14 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
         ? formatDistanceKm(place.radiusKm, useImperial, 5)
           + " forecast awareness · NHC only"
         : coverage.label,
+      dataLimited: coverage.supported && dataIncomplete,
       systemKey: "",
       event: null
+    }
+    if (coverage.supported && !selected && dataIncomplete) {
+      summary.state = "limited"
+      summary.status = "DATA LIMITED"
+      summary.detail = "Some NHC forecast data is temporarily unavailable"
     }
     if (selected && selected.attentionLevel === "urgent") {
       summary.state = "urgent"
@@ -1023,6 +1052,12 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
       summary.systemKey = selected.systemKey
       summary.event = selected
     }
+    var selectedSystemKey = selected
+      ? String(selected.systemKey || selected.key || "") : ""
+    var selectedDataLimited = selected && (
+      (selected.kind === "outlook" && incompleteOutlooks[String(selected.basin || "")])
+      || (selected.kind === "storm" && incompleteSystems[selectedSystemKey]))
+    if (selectedDataLimited) summary.detail += " · update incomplete"
     output.push(summary)
   }
   return output

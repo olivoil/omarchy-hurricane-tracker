@@ -75,6 +75,7 @@ const outlook = {
   twoDayChance: 0,
   sevenDayChance: 10,
   discussionExcerpt: "Redevelopment is unlikely.",
+  connector: [[-51.7, 16.3], [-59, 17.4], [-67, 19]],
   area: [[[-67, 19], [-78, 22], [-75, 27], [-65, 24], [-67, 19]]]
 }
 
@@ -83,7 +84,21 @@ assert.equal(model.outlookChanceLabel(outlook), "0% in 2 days · 10% in 7 days")
 assert.equal(model.systemClassificationLabel(outlook), "Remnant")
 assert.equal(model.discussionExcerpt(outlook), "Redevelopment is unlikely.")
 assert.ok(model.systemBounds(outlook).longitudeSpan >= 12)
-assert.ok(model.systemCoordinates(outlook).length >= 5)
+assert.ok(model.systemCoordinates(outlook).length >= 8)
+const visualOnlyConnector = {
+  ...outlook,
+  latitude: 5,
+  longitude: -30,
+  connector: [[-30, 5], [-71, 23]],
+  area: [[[-35, 4], [-34, 4], [-34, 6], [-35, 6], [-35, 4]]]
+}
+assert.ok(model.outlookWatchProximity(visualOnlyConnector, {
+  id: "connector-test",
+  name: "Connector test",
+  latitude: 23,
+  longitude: -71,
+  radiusKm: 100
+}).distanceKm > 1000)
 
 const systems = model.orderedSystems([storm], [outlook])
 assert.deepEqual(Array.from(systems, item => item.key), ["storm:al012026", "outlook:al-outlook-1"])
@@ -328,6 +343,32 @@ assert.equal(
 assert.equal(model.watchAlertEvents(
   stabilizedForecast.before, stabilizedForecast.current
 ).length, 0)
+const preservedPartialSummary = model.watchPlaceSummaries(
+  [incompleteForecastStorm], [], [cancun], "Medium (40%)", false,
+  {
+    snapshot: stabilizedForecast.current,
+    incompleteSystemKeys: incompleteForecastKeys
+  }
+)[0]
+assert.equal(preservedPartialSummary.state, "monitor")
+assert.equal(preservedPartialSummary.dataLimited, true)
+assert.match(preservedPartialSummary.detail, /update incomplete$/)
+const unknownPartialSummary = model.watchPlaceSummaries(
+  [incompleteForecastStorm], [], [cancun], "Medium (40%)", false,
+  {
+    snapshot: incompleteForecastSnapshot,
+    incompleteSystemKeys: incompleteForecastKeys
+  }
+)[0]
+assert.equal(unknownPartialSummary.state, "limited")
+assert.equal(unknownPartialSummary.status, "DATA LIMITED")
+assert.equal(unknownPartialSummary.dataLimited, true)
+const missingOutlookSummary = model.watchPlaceSummaries(
+  [], [], [cancun], "Medium (40%)", false,
+  { incompleteOutlookBasins: ["al"] }
+)[0]
+assert.equal(missingOutlookSummary.state, "limited")
+assert.equal(missingOutlookSummary.dataLimited, true)
 const recoveredForecast = model.stabilizedAlertSnapshots(
   stabilizedForecast.current, monitorSnapshot, [], []
 )
@@ -416,6 +457,11 @@ assert.equal(model.watchUnsupportedCount([
   { state: "quiet" }, { state: "unsupported" }, { state: "unsupported" }
 ]), 2)
 assert.equal(model.watchUnsupportedCount(null), 0)
+assert.equal(model.watchDataLimitedCount([
+  { state: "quiet" }, { state: "limited", dataLimited: true },
+  { state: "monitor", dataLimited: true }
+]), 2)
+assert.equal(model.watchDataLimitedCount(null), 0)
 assert.equal(model.watchStrongestAttentionState([
   { state: "quiet" }, { state: "heads-up" }, { state: "monitor" }, { state: "urgent" }
 ]), "urgent")

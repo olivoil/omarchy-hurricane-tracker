@@ -45,6 +45,13 @@ class PluginContractTests(unittest.TestCase):
         )
         self.assertLess(point_count, 12000)
 
+    def test_outlook_connectors_are_drawn_as_directional_links(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        self.assertIn("function drawOutlookConnector", storm_map)
+        self.assertIn("outlook.connector", storm_map)
+        self.assertIn("context.rotate", storm_map)
+
     def test_deferred_system_fit_cannot_override_place_focus(self):
         storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
         self.assertIn("function scheduleFitSelected(force)", storm_map)
@@ -191,6 +198,9 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn("if (!outlookDataComplete) return", service)
         self.assertIn("Model.stabilizedAlertSnapshots", service)
         self.assertIn("Model.incompleteForecastSystemKeys", service)
+        self.assertIn("readonly property var watchPlaceSummaries", service)
+        self.assertIn("tracker.watchPlaceSummaries", overlay)
+        self.assertIn("tracker.watchPlaceSummaries", (ROOT / "BarWidget.qml").read_text(encoding="utf-8"))
         self.assertIn('"DATA PARTIAL"', overlay)
 
     def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):
@@ -244,6 +254,14 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("Saved locations outside NHC coverage", bar_widget)
         self.assertIn("location outside NHC coverage", bar_widget)
         self.assertIn("root.personalAlertCount > 0 || root.limitedCoverage", bar_widget)
+
+    def test_bar_surfaces_partial_watch_data(self):
+        bar_widget = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
+
+        self.assertIn("Model.watchDataLimitedCount", bar_widget)
+        self.assertIn("readonly property bool partialWatchData", bar_widget)
+        self.assertIn("NHC data partial", bar_widget)
+        self.assertIn("} else if (partialWatchData) {", bar_widget)
 
 
 if __name__ == "__main__":

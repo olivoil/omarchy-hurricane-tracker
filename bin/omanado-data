@@ -67,6 +67,7 @@ MAX_REMOTE_DISPLAY_FIELD_CHARS = 256
 MAX_TRACK_POINTS = 40
 MAX_PAST_POINTS = 256
 MAX_CONE_POINTS = 420
+MAX_CONNECTOR_POINTS = 96
 USER_AGENT = f"HurricaneTracker/{VERSION} (+https://github.com/olivoil/omarchy-hurricane-tracker)"
 
 CLASSIFICATION_LABELS = {
@@ -786,6 +787,39 @@ def simplify_ring(points: list[list[float]]) -> list[list[float]]:
     return simplified
 
 
+def simplify_open_path(points: list[list[float]]) -> list[list[float]]:
+    """Keep a source line bounded while preserving both directional endpoints."""
+    if len(points) < 2:
+        return []
+
+    source_limit = MAX_CONNECTOR_POINTS * 8
+    working = points
+    if len(working) > source_limit:
+        stride = math.ceil(len(working) / source_limit)
+        working = working[::stride]
+        if working[-1] != points[-1]:
+            working.append(points[-1])
+
+    simplified = simplify_line(working, 0.025)
+    if len(simplified) > MAX_CONNECTOR_POINTS:
+        stride = math.ceil(len(simplified) / (MAX_CONNECTOR_POINTS - 1))
+        sampled = simplified[::stride][: MAX_CONNECTOR_POINTS - 1]
+        if sampled[-1] != simplified[-1]:
+            sampled.append(simplified[-1])
+        simplified = sampled
+    return simplified
+
+
+def coordinate_gap_degrees(first: list[float], second: list[float]) -> float:
+    """Approximate local angular distance while respecting the dateline."""
+    longitude_delta = (first[0] - second[0] + 180) % 360 - 180
+    mean_latitude = math.radians((first[1] + second[1]) / 2)
+    return math.hypot(
+        longitude_delta * max(0.1, math.cos(mean_latitude)),
+        first[1] - second[1],
+    )
+
+
 def category_for_wind(wind_knots: int) -> int:
     if wind_knots < 64:
         return 0
@@ -987,6 +1021,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
     document = parse_xml(extract_kml(data))
     issued_at = outlook_issue_time(document)
     grouped: dict[str, dict[str, Any]] = {}
+    connector_candidates: list[list[list[float]]] = []
 
     for placemark in document.iter():
         if local_name(placemark.tag) != "Placemark":
@@ -994,6 +1029,15 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
         fields = extended_data(placemark)
         disturbance = safe_text(fields.get("Disturbance"), 12)
         discussion = safe_text(fields.get("Discussion"), 3600)
+        line_node = first_descendant(placemark, "LineString")
+        if line_node is not None:
+            coordinates_node = first_descendant(line_node, "coordinates")
+            coordinates = coordinate_pairs(
+                coordinates_node.text if coordinates_node is not None else ""
+            )
+            connector = simplify_open_path(coordinates)
+            if connector:
+                connector_candidates.append(connector)
         if not disturbance or not discussion:
             continue
 
@@ -1010,6 +1054,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
                 "latitude": None,
                 "longitude": None,
                 "area": [],
+                "connector": [],
             },
         )
 
@@ -1027,6 +1072,29 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
             coordinates = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
             if len(coordinates) >= 4:
                 row["area"].append(simplify_ring(coordinates))
+
+    # NHC's KMZ currently omits ExtendedData from the arrow LineString. Pair
+    # each line with the closest disturbance marker, orienting it away from
+    # that marker and toward the potential formation area.
+    for connector in connector_candidates:
+        closest_row: dict[str, Any] | None = None
+        closest_distance = math.inf
+        reverse = False
+        for row in grouped.values():
+            latitude = number(row.get("latitude"))
+            longitude = number(row.get("longitude"))
+            if latitude is None or longitude is None:
+                continue
+            marker = [longitude, latitude]
+            start_distance = coordinate_gap_degrees(connector[0], marker)
+            end_distance = coordinate_gap_degrees(connector[-1], marker)
+            distance = min(start_distance, end_distance)
+            if distance < closest_distance:
+                closest_row = row
+                closest_distance = distance
+                reverse = end_distance < start_distance
+        if closest_row is not None and closest_distance <= 4.0:
+            closest_row["connector"] = list(reversed(connector)) if reverse else connector
 
     output: list[dict[str, Any]] = []
     for row in grouped.values():
@@ -1068,6 +1136,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
                 "discussionExcerpt": row["discussion"],
                 "discussionUrl": "https://www.nhc.noaa.gov/gtwo.php",
                 "area": row["area"],
+                "connector": row["connector"],
             }
         )
     return output[:MAX_OUTLOOKS]

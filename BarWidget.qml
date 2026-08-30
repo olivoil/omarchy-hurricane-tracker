@@ -17,10 +17,11 @@ BarWidget {
   readonly property var strongestStorm: activeCount > 0 ? tracker.storms[0] : null
   readonly property bool hasWatchPlaces: tracker ? tracker.watchPlaceCount > 0 : false
   readonly property var watchPlaceSummaries: hasWatchPlaces
-    ? Model.watchPlaceSummaries(tracker.storms, tracker.outlooks,
-      tracker.watchPlaces, tracker.formationThreshold, tracker.useImperial === true) : []
+    && Array.isArray(tracker.watchPlaceSummaries) ? tracker.watchPlaceSummaries : []
   readonly property int personalAlertCount: Model.watchAttentionCount(watchPlaceSummaries)
   readonly property int unsupportedPlaceCount: Model.watchUnsupportedCount(watchPlaceSummaries)
+  readonly property int dataLimitedPlaceCount: Model.watchDataLimitedCount(watchPlaceSummaries)
+  readonly property bool partialWatchData: hasWatchPlaces && dataLimitedPlaceCount > 0
   readonly property bool limitedCoverage: hasWatchPlaces && unsupportedPlaceCount > 0
   readonly property bool allWatchPlacesUnsupported: limitedCoverage
     && unsupportedPlaceCount === watchPlaceSummaries.length
@@ -30,7 +31,8 @@ BarWidget {
   readonly property color personalAlertColor: personalAttentionState === "urgent" ? Color.urgent
     : (personalAttentionState === "monitor" ? "#e9be62" : Color.accent)
   readonly property color indicatorColor: hasWatchPlaces
-    ? (limitedCoverage && personalAlertCount === 0 ? "#e9be62" : personalAlertColor)
+    ? ((limitedCoverage || partialWatchData) && personalAlertCount === 0
+      ? "#e9be62" : personalAlertColor)
     : (strongestStorm ? Model.severityColor(strongestStorm)
       : (bar ? bar.barForeground : Color.foreground))
 
@@ -55,6 +57,7 @@ BarWidget {
       if (personalAlertCount > 0) {
         summary = personalAlertCount + (personalAlertCount === 1
           ? " location needs attention" : " locations need attention")
+        if (partialWatchData) summary += " · NHC data partial"
         if (limitedCoverage) summary += " · " + unsupportedPlaceCount
           + (unsupportedPlaceCount === 1
             ? " location outside NHC coverage" : " locations outside NHC coverage")
@@ -62,6 +65,11 @@ BarWidget {
         summary = watchPlaceSummaries.length === 1
           ? "Saved location outside NHC coverage"
           : "Saved locations outside NHC coverage"
+      } else if (partialWatchData) {
+        summary = "NHC data partial for saved locations"
+        if (limitedCoverage) summary += " · " + unsupportedPlaceCount
+          + (unsupportedPlaceCount === 1
+            ? " location outside coverage" : " locations outside coverage")
       } else if (limitedCoverage) {
         summary = unsupportedPlaceCount
           + (unsupportedPlaceCount === 1
@@ -91,7 +99,7 @@ BarWidget {
     text: " "
     labelVisible: false
     fixedWidth: Math.max(Style.space(24), barContent.implicitWidth + Style.space(10))
-    active: root.indicatorCount > 0 || root.limitedCoverage
+    active: root.indicatorCount > 0 || root.limitedCoverage || root.partialWatchData
     activeColor: root.indicatorColor
     tooltipText: root.tooltip()
 
@@ -130,7 +138,8 @@ BarWidget {
       } else if (mouseButton === Qt.RightButton) {
         root.openSource()
       } else if (root.hasWatchPlaces
-          && (root.personalAlertCount > 0 || root.limitedCoverage)) {
+          && (root.personalAlertCount > 0 || root.limitedCoverage
+            || root.partialWatchData)) {
         root.bar.run("omarchy-shell shell summon " + root.pluginId + " '{\"alerts\":true}'")
       } else {
         root.bar.run("omarchy-shell shell toggle " + root.pluginId)
