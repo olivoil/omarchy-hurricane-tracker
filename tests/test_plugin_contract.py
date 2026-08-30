@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import json
 from pathlib import Path
 import unittest
@@ -29,9 +30,34 @@ class PluginContractTests(unittest.TestCase):
         self.assertTrue((ROOT / "preview.png").is_file())
 
     def test_backend_is_executable(self):
-        backend = ROOT / "bin" / "omanado-data"
+        backend = ROOT / "bin" / "hurricane-tracker-data"
         self.assertTrue(backend.is_file())
         self.assertNotEqual(backend.stat().st_mode & 0o111, 0)
+
+    def test_launcher_entry_summons_the_overlay(self):
+        desktop_file = ROOT / "hurricane-tracker.desktop"
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.optionxform = str
+        parser.read(desktop_file, encoding="utf-8")
+
+        entry = parser["Desktop Entry"]
+        self.assertEqual(entry["Type"], "Application")
+        self.assertEqual(entry["Name"], "Hurricane Tracker")
+        self.assertEqual(
+            entry["Exec"],
+            "omarchy-shell shell summon io.github.olivoil.hurricane-tracker {}",
+        )
+        self.assertEqual(entry["TryExec"], "omarchy-shell")
+        self.assertEqual(entry["Icon"], "@ICON@")
+        self.assertEqual(entry["X-Hurricane-Tracker-Managed"], "true")
+
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        self.assertIn("hurricane-tracker.desktop", service)
+        self.assertIn("X-Hurricane-Tracker-Managed=true", service)
+        self.assertIn('Quickshell.env("XDG_DATA_HOME")', service)
+        self.assertIn("launcherIntentFile.setText", service)
+        self.assertIn("blockWrites: true", service)
+        self.assertIn("Component.onDestruction", service)
 
     def test_generated_map_has_bounded_geometry(self):
         collection = json.loads((ROOT / "assets" / "countries.json").read_text(encoding="utf-8"))

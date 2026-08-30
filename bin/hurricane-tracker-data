@@ -96,7 +96,7 @@ def cache_path() -> Path:
             "XDG_CACHE_HOME", str(Path(os.environ.get("HOME", ".")) / ".cache")
         )
     )
-    return root / "omanado" / "storms.json"
+    return root / "hurricane-tracker" / "storms.json"
 
 
 def safe_text(value: Any, limit: int = 160) -> str:
@@ -892,7 +892,7 @@ def fetch_with_fallback(
         write_cache(payload, path)
         return payload
     except Exception as error:
-        print(f"omanado-data: {safe_text(error, 240)}", file=sys.stderr)
+        print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
         return unavailable_payload(
             "The National Hurricane Center is unavailable. Showing the last saved advisory when possible.",
             read_cache(path),

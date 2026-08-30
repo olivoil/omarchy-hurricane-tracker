@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Hurricane Tracker
+GenericName=Tropical Weather Tracker
+Comment=Track NHC tropical cyclones, forecast paths, and development outlooks
+Exec=omarchy-shell shell summon io.github.olivoil.hurricane-tracker {}
+TryExec=omarchy-shell
+Icon=@ICON@
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=hurricane;storm;tropical;weather;forecast;cyclone;NHC;NOAA;
+X-Hurricane-Tracker-Managed=true
