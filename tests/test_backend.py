@@ -110,6 +110,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(outlook["name"], "Dolly")
         self.assertEqual(outlook["classificationLabel"], "Remnant")
         self.assertEqual(outlook["basinLabel"], "Atlantic")
+        self.assertEqual(outlook["sourceBasin"], "al")
         self.assertEqual(outlook["sevenDayChance"], 10)
         self.assertEqual(len(outlook["area"]), 1)
         self.assertGreaterEqual(len(outlook["connector"]), 2)
@@ -117,6 +118,16 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(outlook["connector"][-1], [-67.0, 19.0])
         self.assertLessEqual(len(outlook["connector"]), omanado.MAX_CONNECTOR_POINTS)
         self.assertEqual(outlook["updatedAt"], "2026-08-28T23:39:08Z")
+
+    def test_outlook_keeps_its_source_feed_when_displayed_across_a_boundary(self):
+        document = fixture("outlook.kml").replace(
+            b"-51.4,16.2,0", b"-145.0,16.2,0"
+        )
+        outlook = omanado.parse_outlooks(kmz(document), "ep")[0]
+
+        self.assertEqual(outlook["basin"], "cp")
+        self.assertEqual(outlook["sourceBasin"], "ep")
+        self.assertTrue(outlook["id"].startswith("cp-outlook-"))
 
     def test_forecast_discussion_extracts_narrative_and_forecaster(self):
         discussion = omanado.parse_forecast_discussion(fixture("discussion.html"))

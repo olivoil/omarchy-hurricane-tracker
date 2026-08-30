@@ -106,8 +106,10 @@ region summaries, a maximum of 20 cyclones, and a maximum of 24 outlook areas.
 Each cyclone contains the current summary, a discussion excerpt, and bounded
 arrays named `pastTrack`, `track`, and `cone`. Each outlook contains NHC's
 two-day and seven-day probabilities, discussion excerpt, marker, and bounded
-formation polygons. When NHC publishes one, an outlook also contains a bounded
-`connector` from its current marker toward that area. The connector is
+formation polygons. Outlooks retain both their display `basin` and the
+`sourceBasin` feed that supplied them, so partial-feed handling survives the
+Eastern/Central Pacific display handoff. When NHC publishes one, an outlook
+also contains a bounded `connector` from its current marker toward that area. The connector is
 presentation-only; alert proximity continues to use the marker and official
 formation polygon. Partial detail failure leaves the current cyclone visible
 and adds a `dataWarnings` entry rather than dropping the whole advisory. Failed

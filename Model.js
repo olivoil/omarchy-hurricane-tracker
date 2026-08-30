@@ -610,8 +610,8 @@ function outlookBasinCoverageRing(basin) {
     [-82, 32], [-98, 30], [-100, 20], [-90, 10], [-80, 0]
   ]
   if (code === "ep") return [
-    [-140, 0], [-140, 60], [-128, 60], [-124, 45], [-117, 32],
-    [-107, 24], [-98, 17], [-89, 10], [-80, 0], [-140, 0]
+    [-180, 0], [-180, 60], [-128, 60], [-124, 45], [-117, 32],
+    [-107, 24], [-98, 17], [-89, 10], [-80, 0], [-180, 0]
   ]
   if (code === "cp") return [
     [-180, 0], [-140, 0], [-140, 60], [-180, 60], [-180, 0]
@@ -874,6 +874,7 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
         placeId: place.id, placeName: place.name, radiusKm: place.radiusKm,
         name: String(developing[o].name || developing[o].title || "Developing system"),
         basin: String(developing[o].basin || ""),
+        sourceBasin: String(developing[o].sourceBasin || developing[o].basin || ""),
         systemKey: "outlook:" + String(developing[o].id || ""),
         outlookIdentity: outlookIdentityLabel(developing[o]),
         outlookStableIdentifier: outlookStableIdentifier(developing[o]),
@@ -914,6 +915,17 @@ function outlookStableIdentifier(system) {
 
 function outlookIdentityIsStable(system) {
   return outlookStableIdentifier(system) !== ""
+}
+
+function outlookSourceBasin(system) {
+  return String(system && (system.sourceBasin || system.basin) || "")
+}
+
+function outlookDataIncomplete(system, incompleteOutlooks) {
+  var rows = incompleteOutlooks || ({})
+  var sourceBasin = outlookSourceBasin(system)
+  var displayBasin = String(system && system.basin || "")
+  return !!(rows[sourceBasin] || rows[displayBasin])
 }
 
 function outlooksSharePacificBoundary(first, second) {
@@ -1043,13 +1055,12 @@ function stabilizedAlertSnapshots(previous, current, incompleteOutlookBasins,
     var previousItem = before[key]
     if (!previousItem) continue
     var preserveOutlook = previousItem.kind === "outlook"
-      && incompleteOutlooks[String(previousItem.basin || "")]
+      && outlookDataIncomplete(previousItem, incompleteOutlooks)
     if (preserveOutlook) {
       var currentMatch = matchingSnapshotEntry(after, previousItem, ({}))
-      var currentBasin = String(currentMatch && currentMatch.item
-        && currentMatch.item.basin || "")
-      if (currentMatch && currentBasin !== String(previousItem.basin || "")
-          && !incompleteOutlooks[currentBasin]) continue
+      var currentSourceBasin = outlookSourceBasin(currentMatch && currentMatch.item)
+      if (currentMatch && currentSourceBasin !== outlookSourceBasin(previousItem)
+          && !outlookDataIncomplete(currentMatch.item, incompleteOutlooks)) continue
     }
     var systemKey = previousItem.scope === "place"
       ? String(previousItem.systemKey || "") : String(previousItem.key || "")
@@ -1203,7 +1214,7 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
     var selectedSystemKey = selected
       ? String(selected.systemKey || selected.key || "") : ""
     var selectedDataLimited = selected && (
-      (selected.kind === "outlook" && incompleteOutlooks[String(selected.basin || "")])
+      (selected.kind === "outlook" && outlookDataIncomplete(selected, incompleteOutlooks))
       || (selected.kind === "storm" && incompleteSystems[selectedSystemKey]))
     if (selectedDataLimited) {
       summary.dataLimited = true
@@ -1256,6 +1267,7 @@ function alertSnapshot(storms, outlooks, regionValue, thresholdValue, includeNam
     output[outlookKey] = {
       kind: "outlook", key: outlookKey, name: String(developing[o].name || developing[o].title || "Developing system"),
       basin: String(developing[o].basin || ""), label: String(developing[o].classificationLabel || "Developing system"),
+      sourceBasin: String(developing[o].sourceBasin || developing[o].basin || ""),
       outlookIdentity: outlookIdentityLabel(developing[o]),
       outlookStableIdentifier: outlookStableIdentifier(developing[o]),
       outlookIdentityStable: outlookIdentityIsStable(developing[o]),

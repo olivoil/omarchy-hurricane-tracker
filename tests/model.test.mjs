@@ -259,6 +259,7 @@ const easternPacificBoundaryOutlook = {
   ...developing,
   id: "ep-outlook-1",
   basin: "ep",
+  sourceBasin: "ep",
   name: "Pacific boundary disturbance",
   title: "Pacific boundary disturbance",
   latitude: 15,
@@ -269,6 +270,7 @@ const centralPacificBoundaryOutlook = {
   ...easternPacificBoundaryOutlook,
   id: "cp-outlook-1",
   basin: "cp",
+  sourceBasin: "cp",
   longitude: -140.2
 }
 const allBasinsBeforeBoundary = model.alertSnapshot(
@@ -342,6 +344,79 @@ const stabilizedBoundaryPlace = model.stabilizedAlertSnapshots(
 assert.equal(Object.keys(stabilizedBoundaryPlace.current).length, 1)
 assert.equal(model.watchAlertEvents(
   stabilizedBoundaryPlace.before, stabilizedBoundaryPlace.current
+).length, 0)
+
+const centralPacificSourcePlace = {
+  id: "central-pacific-source",
+  name: "Central Pacific source",
+  latitude: 15,
+  longitude: -155,
+  radiusKm: 500
+}
+const relabeledEasternSourceOutlook = {
+  ...centralPacificBoundaryOutlook,
+  id: "cp-outlook-ep-source",
+  sourceBasin: "ep",
+  longitude: -155,
+  area: [[[-156, 14], [-154, 14], [-154, 16], [-156, 16], [-156, 14]]]
+}
+const relabeledSourceSnapshot = model.alertSnapshot(
+  [], [relabeledEasternSourceOutlook], "All NHC basins", "Medium (40%)", true
+)
+assert.equal(
+  relabeledSourceSnapshot["outlook:cp-outlook-ep-source"].sourceBasin,
+  "ep"
+)
+const preservedEasternSource = model.stabilizedAlertSnapshots(
+  relabeledSourceSnapshot,
+  model.alertSnapshot([], [], "All NHC basins", "Medium (40%)", true),
+  ["ep"], []
+)
+assert.equal(
+  preservedEasternSource.current["outlook:cp-outlook-ep-source"].meetsThreshold,
+  true
+)
+const recoveredEasternSource = model.stabilizedAlertSnapshots(
+  preservedEasternSource.current, relabeledSourceSnapshot, [], []
+)
+assert.equal(model.alertEvents(
+  recoveredEasternSource.before, recoveredEasternSource.current
+).length, 0)
+const dedicatedCentralReplacement = {
+  ...relabeledEasternSourceOutlook,
+  id: "cp-outlook-cp-source",
+  sourceBasin: "cp"
+}
+const stabilizedSourceReplacement = model.stabilizedAlertSnapshots(
+  relabeledSourceSnapshot,
+  model.alertSnapshot(
+    [], [dedicatedCentralReplacement], "All NHC basins", "Medium (40%)", true
+  ),
+  ["ep"], []
+)
+assert.equal(Object.keys(stabilizedSourceReplacement.current).length, 1)
+assert.equal(model.alertEvents(
+  stabilizedSourceReplacement.before, stabilizedSourceReplacement.current
+).length, 0)
+assert.equal(model.watchPlaceTouchesOutlookBasin(centralPacificSourcePlace, "ep"), true)
+const relabeledSourcePlaceSnapshot = model.watchAlertSnapshot(
+  [], [relabeledEasternSourceOutlook], [centralPacificSourcePlace], "Medium (40%)"
+)
+const preservedEasternSourcePlace = model.stabilizedAlertSnapshots(
+  relabeledSourcePlaceSnapshot, {}, ["ep"], []
+)
+const easternSourceSummary = model.watchPlaceSummaries(
+  [], [], [centralPacificSourcePlace], "Medium (40%)", false,
+  {
+    snapshot: preservedEasternSourcePlace.current,
+    incompleteOutlookBasins: ["ep"]
+  }
+)[0]
+assert.equal(easternSourceSummary.state, "heads-up")
+assert.equal(easternSourceSummary.dataLimited, true)
+assert.match(easternSourceSummary.detail, /update incomplete$/)
+assert.equal(model.watchAlertEvents(
+  preservedEasternSourcePlace.current, relabeledSourcePlaceSnapshot
 ).length, 0)
 
 const home = {

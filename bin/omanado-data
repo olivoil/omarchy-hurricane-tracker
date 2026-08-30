@@ -1133,6 +1133,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
                 "name": name,
                 "title": title,
                 "basin": basin,
+                "sourceBasin": source_basin,
                 "basinLabel": BASIN_LABELS[basin],
                 "classification": "REM" if lifecycle.lower().startswith("remnant") else "DB",
                 "classificationLabel": lifecycle,
