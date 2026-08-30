@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import pwd
 import subprocess
 import tempfile
 import threading
@@ -662,6 +663,26 @@ class BackendTests(unittest.TestCase):
                     clear=False,
                 ):
                     self.assertEqual(omanado.watch_config_path(), expected)
+
+    def test_relative_home_uses_the_account_directory_fallback(self):
+        account_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        expected = account_home / ".config" / "omanado" / "watch-places.json"
+        with mock.patch.dict(
+            os.environ,
+            {"HOME": "relative/home", "XDG_CONFIG_HOME": ""},
+            clear=False,
+        ):
+            self.assertEqual(omanado.watch_config_path(), expected)
+            self.assertTrue(omanado.watch_config_path().is_absolute())
+
+    def test_unresolved_relative_home_is_rejected(self):
+        with mock.patch.dict(
+            os.environ,
+            {"HOME": "relative/home", "XDG_CONFIG_HOME": "relative/config"},
+            clear=False,
+        ), mock.patch("pwd.getpwuid", return_value=mock.Mock(pw_dir="relative/account")):
+            with self.assertRaises(omanado.DataError):
+                omanado.watch_config_path()
 
     def test_watch_place_radius_defaults_to_forecast_awareness_range(self):
         place = omanado.normalized_watch_place(

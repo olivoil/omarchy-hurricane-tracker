@@ -18,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path
+import pwd
 import re
 import sys
 import tempfile
@@ -116,8 +117,17 @@ def utc_now() -> str:
 
 def home_directory() -> Path:
     configured = os.environ.get("HOME")
-    candidate = Path(configured) if configured else Path.home()
-    return candidate if candidate.is_absolute() else Path.home()
+    if configured:
+        candidate = Path(configured)
+        if candidate.is_absolute():
+            return candidate
+    try:
+        candidate = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (KeyError, OSError, TypeError) as error:
+        raise DataError("User home directory is unavailable") from error
+    if not candidate.is_absolute():
+        raise DataError("User home directory is unavailable")
+    return candidate
 
 
 def xdg_base_path(environment_name: str, fallback_directory: str) -> Path:
