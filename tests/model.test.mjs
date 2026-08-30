@@ -278,6 +278,13 @@ const allBasinsAfterBoundary = model.alertSnapshot(
   [], [centralPacificBoundaryOutlook], "All NHC basins", "Medium (40%)", true
 )
 assert.equal(model.alertEvents(allBasinsBeforeBoundary, allBasinsAfterBoundary).length, 0)
+const stabilizedAllBasinsBoundary = model.stabilizedAlertSnapshots(
+  allBasinsBeforeBoundary, allBasinsAfterBoundary, ["ep"], []
+)
+assert.equal(Object.keys(stabilizedAllBasinsBoundary.current).length, 1)
+assert.equal(model.alertEvents(
+  stabilizedAllBasinsBoundary.before, stabilizedAllBasinsBoundary.current
+).length, 0)
 const easternBoundaryInvest = {
   ...easternPacificBoundaryOutlook,
   name: "Pacific boundary disturbance (EP90)",
@@ -320,13 +327,21 @@ const pacificBoundaryPlace = {
   longitude: -140,
   radiusKm: 500
 }
+const boundaryPlaceBefore = model.watchAlertSnapshot(
+  [], [easternPacificBoundaryOutlook], [pacificBoundaryPlace], "Medium (40%)"
+)
+const boundaryPlaceAfter = model.watchAlertSnapshot(
+  [], [centralPacificBoundaryOutlook], [pacificBoundaryPlace], "Medium (40%)"
+)
 assert.equal(model.watchAlertEvents(
-  model.watchAlertSnapshot(
-    [], [easternPacificBoundaryOutlook], [pacificBoundaryPlace], "Medium (40%)"
-  ),
-  model.watchAlertSnapshot(
-    [], [centralPacificBoundaryOutlook], [pacificBoundaryPlace], "Medium (40%)"
-  )
+  boundaryPlaceBefore, boundaryPlaceAfter
+).length, 0)
+const stabilizedBoundaryPlace = model.stabilizedAlertSnapshots(
+  boundaryPlaceBefore, boundaryPlaceAfter, ["ep"], []
+)
+assert.equal(Object.keys(stabilizedBoundaryPlace.current).length, 1)
+assert.equal(model.watchAlertEvents(
+  stabilizedBoundaryPlace.before, stabilizedBoundaryPlace.current
 ).length, 0)
 
 const home = {

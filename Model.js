@@ -1044,6 +1044,13 @@ function stabilizedAlertSnapshots(previous, current, incompleteOutlookBasins,
     if (!previousItem) continue
     var preserveOutlook = previousItem.kind === "outlook"
       && incompleteOutlooks[String(previousItem.basin || "")]
+    if (preserveOutlook) {
+      var currentMatch = matchingSnapshotEntry(after, previousItem, ({}))
+      var currentBasin = String(currentMatch && currentMatch.item
+        && currentMatch.item.basin || "")
+      if (currentMatch && currentBasin !== String(previousItem.basin || "")
+          && !incompleteOutlooks[currentBasin]) continue
+    }
     var systemKey = previousItem.scope === "place"
       ? String(previousItem.systemKey || "") : String(previousItem.key || "")
     var preserveSystem = previousItem.kind === "storm" && incompleteSystems[systemKey]
