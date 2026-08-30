@@ -405,14 +405,45 @@ class BackendTests(unittest.TestCase):
         self.assertIn("Ada has strengthened", storm["discussionExcerpt"])
         self.assertEqual(payload["outlooks"][0]["name"], "Dolly")
         self.assertEqual(payload["regions"][0]["outlookCount"], 1)
+        self.assertEqual(payload["incompleteOutlookBasins"], [])
 
     def test_empty_live_feed_is_a_fresh_quiet_state(self):
-        payload = omanado.build_live_payload(
-            lambda url, maximum: json.dumps({"activeStorms": []}).encode("utf-8")
-        )
+        def fetcher(url: str, maximum: int) -> bytes:
+            if url == omanado.CURRENT_STORMS_URL:
+                return json.dumps({"activeStorms": []}).encode("utf-8")
+            return kmz(fixture("empty-outlook.kml"))
+
+        payload = omanado.build_live_payload(fetcher)
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(payload["storms"], [])
         self.assertEqual(payload["outlooks"], [])
+        self.assertEqual(payload["incompleteOutlookBasins"], [])
+
+    def test_partial_outlook_failure_is_declared_in_the_payload(self):
+        def fetcher(url: str, maximum: int) -> bytes:
+            if url == omanado.CURRENT_STORMS_URL:
+                return json.dumps({"activeStorms": []}).encode("utf-8")
+            if url == omanado.OUTLOOK_URLS["al"]:
+                raise omanado.DataError("Atlantic outlook unavailable")
+            return kmz(fixture("empty-outlook.kml"))
+
+        payload = omanado.build_live_payload(fetcher)
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["incompleteOutlookBasins"], ["al"])
+        self.assertTrue(omanado.valid_payload(payload))
+        self.assertFalse(omanado.valid_payload({
+            **payload, "incompleteOutlookBasins": ["al", "al"]
+        }))
+        self.assertFalse(omanado.valid_payload({
+            **payload, "incompleteOutlookBasins": ["unknown"]
+        }))
+        self.assertFalse(omanado.valid_payload({
+            **payload, "incompleteOutlookBasins": [{}]
+        }))
+        legacy_payload = dict(payload)
+        legacy_payload.pop("incompleteOutlookBasins")
+        self.assertTrue(omanado.valid_payload(legacy_payload))
 
     def test_detail_failure_keeps_the_current_storm_visible(self):
         def fetcher(url: str, maximum: int) -> bytes:

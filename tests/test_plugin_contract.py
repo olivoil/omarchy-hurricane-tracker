@@ -181,6 +181,16 @@ class PluginContractTests(unittest.TestCase):
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
         self.assertIn("events = Model.coalesceAlertEvents(events)", service)
 
+    def test_partial_outlook_data_preserves_alert_baselines(self):
+        backend = (ROOT / "bin" / "omanado-data").read_text(encoding="utf-8")
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+
+        self.assertIn('"incompleteOutlookBasins"', backend)
+        self.assertIn("readonly property bool outlookDataComplete", service)
+        self.assertIn("if (!outlookDataComplete) return", service)
+        self.assertIn('"DATA PARTIAL"', overlay)
+
     def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         self.assertIn('property bool draftPlaceNameManuallyEdited: false', overlay)

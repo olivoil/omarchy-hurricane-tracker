@@ -107,4 +107,7 @@ Each cyclone contains the current summary, a discussion excerpt, and bounded
 arrays named `pastTrack`, `track`, and `cone`. Each outlook contains NHC's
 two-day and seven-day probabilities, discussion excerpt, marker, and bounded
 formation polygons. Partial detail failure leaves the current cyclone visible
-and adds a `dataWarnings` entry rather than dropping the whole advisory.
+and adds a `dataWarnings` entry rather than dropping the whole advisory. Failed
+outlook products are listed in `incompleteOutlookBasins`; available data stays
+visible, the UI reports a partial feed, and alert baselines remain frozen until
+all outlook products are complete again.

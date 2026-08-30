@@ -3150,13 +3150,15 @@ Item {
               radius: 3
               color: !root.tracker || root.tracker.loading ? root.dim
                 : (root.tracker.stale ? "#e9be62"
-                  : (root.tracker.status === "fresh" ? "#45c6b5" : root.urgent))
+                  : (root.tracker.status !== "fresh" ? root.urgent
+                    : (!root.tracker.outlookDataComplete ? "#e9be62" : "#45c6b5")))
             }
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: !root.tracker || (!root.tracker.hasLoaded && root.tracker.loading)
                 ? "CHECKING DATA" : (root.tracker.stale ? "SAVED DATA"
-                  : (root.tracker.status === "fresh" ? "DATA LIVE" : "DATA ISSUE"))
+                  : (root.tracker.status !== "fresh" ? "DATA ISSUE"
+                    : (!root.tracker.outlookDataComplete ? "DATA PARTIAL" : "DATA LIVE")))
               textFormat: Text.PlainText
               color: root.dim
               font.family: Style.font.menuFamily

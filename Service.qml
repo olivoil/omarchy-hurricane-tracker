@@ -77,6 +77,9 @@ Item {
   readonly property int activeCount: Array.isArray(storms) ? storms.length : 0
   readonly property int outlookCount: Array.isArray(outlooks) ? outlooks.length : 0
   readonly property int trackingCount: activeCount + outlookCount
+  readonly property var incompleteOutlookBasins: payload
+    && Array.isArray(payload.incompleteOutlookBasins) ? payload.incompleteOutlookBasins : []
+  readonly property bool outlookDataComplete: incompleteOutlookBasins.length === 0
   readonly property int watchPlaceCount: Array.isArray(watchPlaces) ? watchPlaces.length : 0
   readonly property int refreshMinutes: Math.max(5, Math.min(60, Number(setting("refreshMinutes", 15)) || 15))
   readonly property int retryMultiplier: Math.min(4, Math.pow(2, Math.min(consecutiveFailures, 2)))
@@ -411,6 +414,16 @@ Item {
     if (!parsed || parsed.schemaVersion !== 2 || !Array.isArray(parsed.storms)
         || parsed.storms.length > 20 || !Array.isArray(parsed.outlooks)
         || parsed.outlooks.length > 24 || !Array.isArray(parsed.regions)) return false
+    var incomplete = parsed.incompleteOutlookBasins
+    if (incomplete === undefined) incomplete = []
+    if (!Array.isArray(incomplete) || incomplete.length > 3) return false
+    var incompleteSeen = ({})
+    for (var i = 0; i < incomplete.length; i++) {
+      var basin = incomplete[i]
+      if (typeof basin !== "string" || !/^(al|ep|cp)$/.test(basin)
+          || incompleteSeen[basin]) return false
+      incompleteSeen[basin] = true
+    }
     payload = parsed
     storms = parsed.storms
     outlooks = parsed.outlooks
@@ -429,12 +442,22 @@ Item {
   }
 
   function armAlertsQuietly() {
+    if (!outlookDataComplete) {
+      alertsArmed = false
+      appliedAlertConfig = ""
+      return
+    }
     alertBaseline = currentAlertSnapshot()
     alertsArmed = alertsEnabled && hasLoaded && !stale && status === "fresh"
     appliedAlertConfig = alertConfigKey
   }
 
   function armPlaceAlertsQuietly() {
+    if (!outlookDataComplete) {
+      placeAlertsArmed = false
+      appliedPlaceAlertConfig = ""
+      return
+    }
     placeAlertBaseline = currentPlaceAlertSnapshot()
     placeAlertsArmed = placeAlertsEnabled && hasLoaded && !stale && status === "fresh"
     appliedPlaceAlertConfig = placeAlertConfigKey
@@ -450,6 +473,7 @@ Item {
       appliedPlaceAlertConfig = placeAlertConfigKey
       return
     }
+    if (!outlookDataComplete) return
     var events = []
     if (alertsEnabled) {
       var current = currentAlertSnapshot()

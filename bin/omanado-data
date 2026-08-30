@@ -1232,6 +1232,7 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
                 storms[index]["dataWarnings"].append(f"{layer} unavailable")
 
     outlooks: list[dict[str, Any]] = []
+    incomplete_outlook_basins: list[str] = []
     outlook_jobs: dict[concurrent.futures.Future[bytes], str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         for basin, url in OUTLOOK_URLS.items():
@@ -1241,7 +1242,7 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
             try:
                 outlooks.extend(parse_outlooks(future.result(), basin))
             except Exception:
-                continue
+                incomplete_outlook_basins.append(basin)
 
     # The Pacific and Central Pacific products can describe the same area.
     # Prefer the dedicated CPHC record when the point and title agree.
@@ -1280,8 +1281,19 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
         "error": "",
         "storms": storms,
         "outlooks": outlooks,
+        "incompleteOutlookBasins": [
+            basin for basin in BASIN_LABELS if basin in incomplete_outlook_basins
+        ],
         "regions": regions,
     }
+
+
+def valid_incomplete_outlook_basins(value: Any) -> bool:
+    if not isinstance(value, list) or len(value) > len(BASIN_LABELS):
+        return False
+    if not all(isinstance(basin, str) and basin in BASIN_LABELS for basin in value):
+        return False
+    return len(set(value)) == len(value)
 
 
 def valid_payload(payload: Any) -> bool:
@@ -1292,6 +1304,7 @@ def valid_payload(payload: Any) -> bool:
         and len(payload["storms"]) <= MAX_STORMS
         and isinstance(payload.get("outlooks"), list)
         and len(payload["outlooks"]) <= MAX_OUTLOOKS
+        and valid_incomplete_outlook_basins(payload.get("incompleteOutlookBasins", []))
     )
 
 
@@ -1474,6 +1487,7 @@ def unavailable_payload(message: str, cached: dict[str, Any] | None = None) -> d
         "error": message,
         "storms": [],
         "outlooks": [],
+        "incompleteOutlookBasins": list(BASIN_LABELS),
         "regions": [
             {"id": basin, "name": label, "activeCount": 0, "outlookCount": 0}
             for basin, label in BASIN_LABELS.items()
