@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import zipfile
 
 
@@ -541,6 +542,49 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(result.stdout, "")
             self.assertIn("watch-place settings", result.stderr)
             self.assertEqual(path.read_text(encoding="utf-8"), "{not valid json")
+
+    def test_invalid_persisted_watch_records_are_rejected_without_sanitizing(self):
+        valid = {
+            "id": "home",
+            "name": "Home",
+            "latitude": 21.1619,
+            "longitude": -86.8515,
+            "radiusKm": 1000,
+        }
+        invalid_configs = [
+            {"schemaVersion": 1, "places": [{**valid, "name": ""}]},
+            {"schemaVersion": 1, "places": [{**valid, "latitude": 120}]},
+            {"schemaVersion": 1, "places": [valid, {**valid, "name": "Duplicate"}]},
+            {"schemaVersion": 1, "places": [{**valid, "radiusKm": 9000}]},
+            {
+                "schemaVersion": 1,
+                "places": [
+                    {**valid, "id": f"place-{index}", "name": f"Place {index}"}
+                    for index in range(omanado.MAX_WATCH_PLACES + 1)
+                ],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "watch-places.json"
+            for config in invalid_configs:
+                with self.subTest(config=config):
+                    original = json.dumps(config)
+                    path.write_text(original, encoding="utf-8")
+                    with self.assertRaises(omanado.DataError):
+                        omanado.read_watch_config(path)
+                    self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_empty_or_relative_xdg_config_home_uses_home_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            expected = Path(directory) / ".config" / "omanado" / "watch-places.json"
+            for configured in ("", "relative/config"):
+                with self.subTest(configured=configured), mock.patch.dict(
+                    os.environ,
+                    {"HOME": directory, "XDG_CONFIG_HOME": configured},
+                    clear=False,
+                ):
+                    self.assertEqual(omanado.watch_config_path(), expected)
 
     def test_watch_place_radius_defaults_to_forecast_awareness_range(self):
         place = omanado.normalized_watch_place(

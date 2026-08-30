@@ -113,22 +113,27 @@ def utc_now() -> str:
     )
 
 
+def home_directory() -> Path:
+    configured = os.environ.get("HOME")
+    candidate = Path(configured) if configured else Path.home()
+    return candidate if candidate.is_absolute() else Path.home()
+
+
+def xdg_base_path(environment_name: str, fallback_directory: str) -> Path:
+    configured = os.environ.get(environment_name)
+    if configured:
+        candidate = Path(configured)
+        if candidate.is_absolute():
+            return candidate
+    return home_directory() / fallback_directory
+
+
 def cache_path() -> Path:
-    root = Path(
-        os.environ.get(
-            "XDG_CACHE_HOME", str(Path(os.environ.get("HOME", ".")) / ".cache")
-        )
-    )
-    return root / "omanado" / "storms.json"
+    return xdg_base_path("XDG_CACHE_HOME", ".cache") / "omanado" / "storms.json"
 
 
 def watch_config_path() -> Path:
-    root = Path(
-        os.environ.get(
-            "XDG_CONFIG_HOME", str(Path(os.environ.get("HOME", ".")) / ".config")
-        )
-    )
-    return root / "omanado" / "watch-places.json"
+    return xdg_base_path("XDG_CONFIG_HOME", ".config") / "omanado" / "watch-places.json"
 
 
 def safe_text(value: Any, limit: int = 160) -> str:
@@ -1368,6 +1373,40 @@ def normalize_watch_config(value: Any) -> dict[str, Any]:
     return {"schemaVersion": 1, "places": places}
 
 
+def validate_persisted_watch_config(value: Any) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or type(value.get("schemaVersion")) is not int
+        or value.get("schemaVersion") != 1
+        or not isinstance(value.get("places"), list)
+        or len(value["places"]) > MAX_WATCH_PLACES
+    ):
+        raise DataError("watch-place settings had an unsupported structure")
+    expected_keys = {"id", "name", "latitude", "longitude", "radiusKm"}
+    places = []
+    identifiers: set[str] = set()
+    for row in value["places"]:
+        if (
+            not isinstance(row, dict)
+            or set(row) != expected_keys
+            or not isinstance(row.get("id"), str)
+            or not isinstance(row.get("name"), str)
+            or isinstance(row.get("latitude"), bool)
+            or not isinstance(row.get("latitude"), (int, float))
+            or isinstance(row.get("longitude"), bool)
+            or not isinstance(row.get("longitude"), (int, float))
+            or isinstance(row.get("radiusKm"), bool)
+            or not isinstance(row.get("radiusKm"), (int, float))
+        ):
+            raise DataError("watch-place settings contained an invalid record")
+        place = normalized_watch_place(row)
+        if place is None or place["id"] in identifiers or row != place:
+            raise DataError("watch-place settings contained an invalid record")
+        identifiers.add(place["id"])
+        places.append(place)
+    return {"schemaVersion": 1, "places": places}
+
+
 def read_watch_config(path: Path | None = None) -> dict[str, Any]:
     target = path or watch_config_path()
     if not target.exists():
@@ -1386,13 +1425,7 @@ def read_watch_config(path: Path | None = None) -> dict[str, Any]:
         raise DataError("watch-place settings were not valid UTF-8") from error
     except json.JSONDecodeError as error:
         raise DataError("watch-place settings were not valid JSON") from error
-    if (
-        not isinstance(parsed, dict)
-        or parsed.get("schemaVersion") != 1
-        or not isinstance(parsed.get("places"), list)
-    ):
-        raise DataError("watch-place settings had an unsupported structure")
-    return normalize_watch_config(parsed)
+    return validate_persisted_watch_config(parsed)
 
 
 def write_watch_config(value: Any, path: Path | None = None) -> dict[str, Any]:
