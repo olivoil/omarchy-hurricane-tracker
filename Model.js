@@ -891,20 +891,41 @@ function outlookIdentityIsStable(system) {
   return outlookStableIdentifier(system) !== ""
 }
 
+function outlooksSharePacificBoundary(first, second) {
+  var firstBasin = String(first && first.basin || "")
+  var secondBasin = String(second && second.basin || "")
+  return (firstBasin === "ep" && secondBasin === "cp")
+    || (firstBasin === "cp" && secondBasin === "ep")
+}
+
+function outlookIdentityWithoutInvest(system) {
+  return outlookIdentityLabel(system)
+    .replace(/\b(al|ep|cp)[0-9]{2}\b/g, " ").replace(/\s+/g, " ").trim()
+}
+
 function outlookSnapshotIdentityMatches(first, second) {
-  if (!first || !second || String(first.basin || "") !== String(second.basin || ""))
-    return false
+  if (!first || !second) return false
+  var sameBasin = String(first.basin || "") === String(second.basin || "")
+  var crossesPacificBoundary = outlooksSharePacificBoundary(first, second)
+  if (!sameBasin && !crossesPacificBoundary) return false
   var firstIdentity = outlookIdentityLabel(first)
   var secondIdentity = outlookIdentityLabel(second)
   var firstStableIdentifier = outlookStableIdentifier(first)
   var secondStableIdentifier = outlookStableIdentifier(second)
-  if (firstStableIdentifier !== "" || secondStableIdentifier !== "")
-    return firstStableIdentifier !== "" && firstStableIdentifier === secondStableIdentifier
   var coordinatesAvailable = validCoordinate(first.latitude, first.longitude)
     && validCoordinate(second.latitude, second.longitude)
   var distance = coordinatesAvailable ? haversineDistanceKm(
     first.latitude, first.longitude, second.latitude, second.longitude) : Infinity
+  if (firstStableIdentifier !== "" || secondStableIdentifier !== "") {
+    if (firstStableIdentifier !== "" && firstStableIdentifier === secondStableIdentifier)
+      return true
+    if (!crossesPacificBoundary || !coordinatesAvailable || distance > 1800) return false
+    var firstWithoutInvest = outlookIdentityWithoutInvest(first)
+    var secondWithoutInvest = outlookIdentityWithoutInvest(second)
+    return firstWithoutInvest !== "" && firstWithoutInvest === secondWithoutInvest
+  }
   if (firstIdentity === "" || firstIdentity !== secondIdentity) return false
+  if (crossesPacificBoundary && !coordinatesAvailable) return false
   return !coordinatesAvailable || distance <= 1800
 }
 

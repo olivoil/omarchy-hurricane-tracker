@@ -255,6 +255,80 @@ assert.deepEqual(
   ["outlook:ep-outlook-1"]
 )
 
+const easternPacificBoundaryOutlook = {
+  ...developing,
+  id: "ep-outlook-1",
+  basin: "ep",
+  name: "Pacific boundary disturbance",
+  title: "Pacific boundary disturbance",
+  latitude: 15,
+  longitude: -139.8,
+  area: [[[-141, 14], [-139, 14], [-139, 16], [-141, 16], [-141, 14]]]
+}
+const centralPacificBoundaryOutlook = {
+  ...easternPacificBoundaryOutlook,
+  id: "cp-outlook-1",
+  basin: "cp",
+  longitude: -140.2
+}
+const allBasinsBeforeBoundary = model.alertSnapshot(
+  [], [easternPacificBoundaryOutlook], "All NHC basins", "Medium (40%)", true
+)
+const allBasinsAfterBoundary = model.alertSnapshot(
+  [], [centralPacificBoundaryOutlook], "All NHC basins", "Medium (40%)", true
+)
+assert.equal(model.alertEvents(allBasinsBeforeBoundary, allBasinsAfterBoundary).length, 0)
+const easternBoundaryInvest = {
+  ...easternPacificBoundaryOutlook,
+  name: "Pacific boundary disturbance (EP90)",
+  title: "Pacific boundary disturbance (EP90)"
+}
+const centralBoundaryInvest = {
+  ...centralPacificBoundaryOutlook,
+  name: "Pacific boundary disturbance (CP90)",
+  title: "Pacific boundary disturbance (CP90)"
+}
+assert.equal(model.alertEvents(
+  model.alertSnapshot(
+    [], [easternBoundaryInvest], "All NHC basins", "Medium (40%)", true
+  ),
+  model.alertSnapshot(
+    [], [centralBoundaryInvest], "All NHC basins", "Medium (40%)", true
+  )
+).length, 0)
+assert.equal(model.alertEvents(
+  allBasinsBeforeBoundary,
+  model.alertSnapshot([], [{
+    ...centralPacificBoundaryOutlook,
+    name: "Different Pacific disturbance",
+    title: "Different Pacific disturbance"
+  }], "All NHC basins", "Medium (40%)", true)
+).length, 1)
+assert.equal(model.alertEvents(
+  model.alertSnapshot(
+    [], [easternPacificBoundaryOutlook], "Central Pacific", "Medium (40%)", true
+  ),
+  model.alertSnapshot(
+    [], [centralPacificBoundaryOutlook], "Central Pacific", "Medium (40%)", true
+  )
+).length, 1)
+
+const pacificBoundaryPlace = {
+  id: "pacific-boundary",
+  name: "Pacific boundary",
+  latitude: 15,
+  longitude: -140,
+  radiusKm: 500
+}
+assert.equal(model.watchAlertEvents(
+  model.watchAlertSnapshot(
+    [], [easternPacificBoundaryOutlook], [pacificBoundaryPlace], "Medium (40%)"
+  ),
+  model.watchAlertSnapshot(
+    [], [centralPacificBoundaryOutlook], [pacificBoundaryPlace], "Medium (40%)"
+  )
+).length, 0)
+
 const home = {
   id: "home",
   name: "Home",
