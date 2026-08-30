@@ -603,6 +603,31 @@ function watchPlaceCoverage(place) {
   }
 }
 
+function outlookBasinCoverageRing(basin) {
+  var code = String(basin || "")
+  if (code === "al") return [
+    [-80, 0], [0, 0], [0, 72], [-60, 72], [-75, 45],
+    [-82, 32], [-98, 30], [-100, 20], [-90, 10], [-80, 0]
+  ]
+  if (code === "ep") return [
+    [-140, 0], [-140, 60], [-128, 60], [-124, 45], [-117, 32],
+    [-107, 24], [-98, 17], [-89, 10], [-80, 0], [-140, 0]
+  ]
+  if (code === "cp") return [
+    [-180, 0], [-140, 0], [-140, 60], [-180, 60], [-180, 0]
+  ]
+  return []
+}
+
+function watchPlaceTouchesOutlookBasin(place, basin) {
+  var normalized = normalizeWatchPlace(place)
+  var ring = outlookBasinCoverageRing(basin)
+  if (!normalized || ring.length === 0) return false
+  // These coarse source domains overlap near handoff areas on purpose. They
+  // only decide whether missing data is relevant, never whether an alert fires.
+  return distanceToWatchPathKm(normalized, ring, true) <= normalized.radiusKm
+}
+
 function watchCircleCoordinates(place, requestedSteps) {
   var normalized = normalizeWatchPlace(place)
   if (!normalized) return []
@@ -1071,6 +1096,29 @@ function watchForecastLeadHours(event) {
   return event.attentionLevel === "urgent" || event.proximitySource === "track" ? hours : 0
 }
 
+function watchPlaceHasIncompleteData(place, snapshot, incompleteOutlookRows,
+    incompleteSystems) {
+  var normalized = normalizeWatchPlace(place)
+  if (!normalized) return false
+  var outlookRows = Array.isArray(incompleteOutlookRows) ? incompleteOutlookRows : []
+  for (var b = 0; b < outlookRows.length; b++)
+    if (watchPlaceTouchesOutlookBasin(normalized, outlookRows[b])) return true
+
+  var rows = snapshot && typeof snapshot === "object" ? snapshot : ({})
+  var systems = incompleteSystems || ({})
+  for (var key in rows) {
+    var candidate = rows[key]
+    if (!candidate || candidate.kind !== "storm" || candidate.placeId !== normalized.id
+        || !systems[String(candidate.systemKey || "")]) continue
+    if (candidate.meetsThreshold) return true
+    var distance = Number(candidate.distanceKm)
+    // Missing forecast geometry matters before the centre reaches the watch
+    // area, but should not tint locations several regions away.
+    if (isFinite(distance) && distance <= normalized.radiusKm + 2500) return true
+  }
+  return false
+}
+
 function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperial,
     alertContext) {
   var watches = Array.isArray(places) ? places : []
@@ -1083,7 +1131,6 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
     ? context.incompleteSystemKeys : []
   var incompleteOutlooks = stringSet(incompleteOutlookRows)
   var incompleteSystems = stringSet(incompleteSystemRows)
-  var dataIncomplete = incompleteOutlookRows.length > 0 || incompleteSystemRows.length > 0
   var output = []
   for (var p = 0; p < watches.length; p++) {
     var place = normalizeWatchPlace(watches[p])
@@ -1098,6 +1145,8 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
         selected = candidate
     }
     var coverage = watchPlaceCoverage(place)
+    var dataIncomplete = coverage.supported && watchPlaceHasIncompleteData(
+      place, snapshot, incompleteOutlookRows, incompleteSystems)
     var summary = {
       place: place,
       state: coverage.supported ? "quiet" : "unsupported",
@@ -1149,7 +1198,10 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
     var selectedDataLimited = selected && (
       (selected.kind === "outlook" && incompleteOutlooks[String(selected.basin || "")])
       || (selected.kind === "storm" && incompleteSystems[selectedSystemKey]))
-    if (selectedDataLimited) summary.detail += " · update incomplete"
+    if (selectedDataLimited) {
+      summary.dataLimited = true
+      summary.detail += " · update incomplete"
+    }
     output.push(summary)
   }
   return output

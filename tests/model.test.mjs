@@ -536,6 +536,14 @@ const missingOutlookSummary = model.watchPlaceSummaries(
 )[0]
 assert.equal(missingOutlookSummary.state, "limited")
 assert.equal(missingOutlookSummary.dataLimited, true)
+const scopedPacificOutageSummaries = model.watchPlaceSummaries(
+  [], [], [cancun, pacificBoundaryPlace], "Medium (40%)", false,
+  { incompleteOutlookBasins: ["cp"] }
+)
+assert.equal(scopedPacificOutageSummaries[0].state, "quiet")
+assert.equal(scopedPacificOutageSummaries[0].dataLimited, false)
+assert.equal(scopedPacificOutageSummaries[1].state, "limited")
+assert.equal(scopedPacificOutageSummaries[1].dataLimited, true)
 const recoveredForecast = model.stabilizedAlertSnapshots(
   stabilizedForecast.current, monitorSnapshot, [], []
 )
@@ -572,6 +580,29 @@ assert.equal(
 assert.equal(model.watchAlertEvents(
   trackOnlyIncrease.before, trackOnlyIncrease.current
 ).length, 1)
+
+const incompleteCentralPacificStorm = {
+  ...storm,
+  id: "cp012026",
+  basin: "cp",
+  latitude: 15,
+  longitude: -155,
+  track: [],
+  cone: [],
+  dataWarnings: ["track unavailable", "cone unavailable"]
+}
+const incompleteCentralPacificKeys = model.incompleteForecastSystemKeys(
+  [incompleteCentralPacificStorm]
+)
+const scopedForecastOutageSummaries = model.watchPlaceSummaries(
+  [incompleteCentralPacificStorm], [], [cancun, pacificBoundaryPlace],
+  "Medium (40%)", false,
+  { incompleteSystemKeys: incompleteCentralPacificKeys }
+)
+assert.equal(scopedForecastOutageSummaries[0].state, "quiet")
+assert.equal(scopedForecastOutageSummaries[0].dataLimited, false)
+assert.equal(scopedForecastOutageSummaries[1].state, "limited")
+assert.equal(scopedForecastOutageSummaries[1].dataLimited, true)
 
 const coneOnlyStorm = {
   ...caribbeanMonitor,
