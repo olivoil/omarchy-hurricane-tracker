@@ -97,6 +97,46 @@ class PluginContractTests(unittest.TestCase):
 
         self.assertNotIn('height: Style.space(8)', tracker_menu_lead)
 
+    def test_region_overview_clears_the_selected_system(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        view_region = overlay.split("function viewRegion(basin)", 1)[1].split(
+            "function selectSystem", 1
+        )[0]
+
+        self.assertIn('selectedKey = ""', view_region)
+        self.assertLess(
+            view_region.index('selectedKey = ""'),
+            view_region.index("stormMap.fitRegion(basin)"),
+        )
+
+    def test_watch_place_editor_cannot_leak_into_activity_mode(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        close_function = overlay.split("function close()", 1)[1].split(
+            "function showGlobe", 1
+        )[0]
+        map_wiring = overlay.split("StormMap {", 1)[1].split(
+            "BorderSurface {", 1
+        )[0]
+
+        self.assertIn("if (editingWatchPlace) cancelWatchPlaceEditor()", close_function)
+        self.assertLess(
+            close_function.index("cancelWatchPlaceEditor()"),
+            close_function.index("opened = false"),
+        )
+        self.assertIn("onSidebarModeChanged:", overlay)
+        self.assertIn(
+            'if (sidebarMode !== "alerts" && editingWatchPlace)',
+            overlay,
+        )
+        self.assertIn(
+            'placementMode: root.sidebarMode === "alerts" && root.editingWatchPlace',
+            map_wiring,
+        )
+        self.assertIn(
+            'visible: root.sidebarMode === "alerts" && root.editingWatchPlace',
+            overlay,
+        )
+
     def test_selected_watch_location_reveals_full_alert_copy(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         place_row = overlay.split('id: placeRow', 1)[1].split(
@@ -137,12 +177,15 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("readonly property bool useImperial", overlay)
         self.assertIn("property bool useImperial: false", storm_map)
         self.assertIn("useImperial: root.useImperial", overlay)
-        self.assertIn("Model.formatDistanceKm", service)
         self.assertNotIn("unitSystem", manifest["barWidget"]["defaults"])
         self.assertNotIn(
             "unitSystem",
             {item["key"] for item in manifest["barWidget"]["schema"]},
         )
+        self.assertIn("Model.formatWatchRadius", overlay)
+        self.assertIn("Model.formatWatchRadius", service)
+        self.assertIn("Model.watchRadiusOptions", overlay)
+        self.assertIn("Model.defaultWatchRadiusKm", overlay)
 
     def test_place_editor_supports_search_and_direct_map_placement(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")

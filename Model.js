@@ -399,6 +399,45 @@ function formatDistanceKm(distanceKm, useImperial, roundingIncrement) {
   return groupedInteger(rounded) + (useImperial === true ? " mi" : " km")
 }
 
+function watchRadiusOptions(useImperial, currentRadiusKm) {
+  var displayed = useImperial === true
+    ? [150, 300, 450, 600, 900, 1200]
+    : [250, 500, 750, 1000, 1500, 2000]
+  var output = []
+  for (var i = 0; i < displayed.length; i++) {
+    var distanceKm = useImperial === true
+      ? Math.round(displayed[i] * 1.609344) : displayed[i]
+    output.push({
+      value: String(distanceKm),
+      label: groupedInteger(displayed[i]) + (useImperial === true ? " mi" : " km")
+    })
+  }
+  var current = Math.round(Number(currentRadiusKm))
+  if (isFinite(current) && current >= 50 && current <= 2000) {
+    var found = false
+    for (var r = 0; r < output.length; r++)
+      if (output[r].value === String(current)) found = true
+    if (!found) output.push({
+      value: String(current),
+      label: formatDistanceKm(current, useImperial, 5) + " · current"
+    })
+  }
+  output.sort(function(first, second) { return Number(first.value) - Number(second.value) })
+  return output
+}
+
+function defaultWatchRadiusKm(useImperial) {
+  return Number(watchRadiusOptions(useImperial)[3].value)
+}
+
+function formatWatchRadius(distanceKm, useImperial) {
+  var distance = Math.max(0, Math.round(Number(distanceKm || 0)))
+  var options = watchRadiusOptions(useImperial)
+  for (var i = 0; i < options.length; i++)
+    if (options[i].value === String(distance)) return options[i].label
+  return formatDistanceKm(distance, useImperial, 5)
+}
+
 function formatSpeedMph(speedMph, useImperial) {
   var speed = Math.max(0, Number(speedMph || 0))
   var converted = useImperial === true ? speed : speed * 1.609344
@@ -1170,7 +1209,7 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
       state: coverage.supported ? "quiet" : "unsupported",
       status: coverage.supported ? "QUIET" : "LIMITED",
       detail: coverage.supported
-        ? formatDistanceKm(place.radiusKm, useImperial, 5)
+        ? formatWatchRadius(place.radiusKm, useImperial)
           + " forecast awareness · NHC only"
         : coverage.label,
       dataLimited: coverage.supported && dataIncomplete,

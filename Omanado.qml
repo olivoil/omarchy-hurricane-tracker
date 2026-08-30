@@ -40,6 +40,11 @@ Item {
       placeNameField.text = root.draftPlaceName
   }
 
+  onSidebarModeChanged: {
+    if (sidebarMode !== "alerts" && editingWatchPlace)
+      cancelWatchPlaceEditor()
+  }
+
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.olivoil.hurricane-tracker"
   readonly property var tracker: shell ? shell.serviceFor(pluginId) : null
@@ -113,7 +118,7 @@ Item {
         return String(trackerDefinitions[i].title || trackerDefinitions[i].name)
     return "HURRICANE TRACKER"
   }
-  readonly property var draftWatchPlace: editingWatchPlace
+  readonly property var draftWatchPlace: sidebarMode === "alerts" && editingWatchPlace
     && Model.validCoordinate(draftPlaceLatitude, draftPlaceLongitude) ? ({
       id: editingPlaceId || "draft",
       name: draftPlaceName.trim() || (draftResolvedPlaceLabel
@@ -235,6 +240,7 @@ Item {
   }
 
   function close() {
+    if (editingWatchPlace) cancelWatchPlaceEditor()
     opened = false
   }
 
@@ -312,8 +318,9 @@ Item {
 
   function viewRegion(basin) {
     if (!basin) return
-    stormMap.fitRegion(basin)
+    selectedKey = ""
     Qt.callLater(function() {
+      stormMap.fitRegion(basin)
       var index = root.regionIndexForBasin(basin)
       if (index >= 0) systemList.positionViewAtIndex(index, ListView.Beginning)
     })
@@ -390,7 +397,7 @@ Item {
     draftPlaceName = ""
     draftPlaceLatitude = 999
     draftPlaceLongitude = 999
-    draftPlaceRadiusKm = 1000
+    draftPlaceRadiusKm = Model.defaultWatchRadiusKm(useImperial)
     placeEditorError = ""
     draftPlaceNameManuallyEdited = false
     resetPlaceSearch()
@@ -581,7 +588,7 @@ Item {
 
   function watchPlaceRuleLabel(place) {
     return "Forecast cone or 7-day formation area within "
-      + Model.formatDistanceKm(place && place.radiusKm || 1000, useImperial, 5)
+      + Model.formatWatchRadius(place && place.radiusKm || 1000, useImperial)
   }
 
   function watchPlaceScopeLabel(summary) {
@@ -977,7 +984,7 @@ Item {
           selectedKey: root.mapSelectedKey
           autoFitSelection: root.sidebarMode === "activity"
           selectedPlaceId: root.selectedPlaceId
-          placementMode: root.editingWatchPlace
+          placementMode: root.sidebarMode === "alerts" && root.editingWatchPlace
           draftWatchPlace: root.draftWatchPlace
           useImperial: root.useImperial
           bottomInset: root.sidebarMode === "activity" && root.selectedStorm ? root.timelineHeight : 0
@@ -1003,7 +1010,7 @@ Item {
 
         BorderSurface {
           id: placementGuide
-          visible: root.editingWatchPlace
+          visible: root.sidebarMode === "alerts" && root.editingWatchPlace
           anchors.horizontalCenter: parent.horizontalCenter
           anchors.top: parent.top
           anchors.topMargin: Style.spacing.lg
@@ -2611,14 +2618,8 @@ Item {
                           showLabel: false
                           rowHeight: root.minimumTouchTarget
                           value: String(root.draftPlaceRadiusKm)
-                          options: [
-                            { value: "250", label: Model.formatDistanceKm(250, root.useImperial, 5) },
-                            { value: "500", label: Model.formatDistanceKm(500, root.useImperial, 5) },
-                            { value: "750", label: Model.formatDistanceKm(750, root.useImperial, 5) },
-                            { value: "1000", label: Model.formatDistanceKm(1000, root.useImperial, 5) },
-                            { value: "1500", label: Model.formatDistanceKm(1500, root.useImperial, 5) },
-                            { value: "2000", label: Model.formatDistanceKm(2000, root.useImperial, 5) }
-                          ]
+                          options: Model.watchRadiusOptions(
+                            root.useImperial, root.draftPlaceRadiusKm)
                           foreground: root.foreground
                           background: root.deepSurface
                           popupBorder: root.softBorder

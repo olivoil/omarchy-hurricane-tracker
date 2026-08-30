@@ -534,20 +534,20 @@ Item {
           && event.attentionLevel === "urgent") {
         headline = event.name + " is approaching " + event.placeName
         description = "The cyclone is within the "
-          + Model.formatDistanceKm(event.radiusKm, useImperial, 5)
+          + Model.formatWatchRadius(event.radiusKm, useImperial)
           + " awareness area and the NHC forecast continues materially closer"
           + forecastLeadLabel(Model.watchForecastLeadHours(event))
           + ". Awareness only, not a local warning."
       } else if (event.scope === "place" && event.kind === "storm") {
         headline = event.name + " may pass near " + event.placeName
         description = "The NHC forecast cone or center track may come within the "
-          + Model.formatDistanceKm(event.radiusKm, useImperial, 5) + " awareness area"
+          + Model.formatWatchRadius(event.radiusKm, useImperial) + " awareness area"
           + forecastLeadLabel(Model.watchForecastLeadHours(event))
           + ". Awareness only, not a local warning."
       } else if (event.scope === "place") {
         headline = "Formation heads-up for " + event.placeName
         description = "An NHC 7-day formation area that may approach the "
-          + Model.formatDistanceKm(event.radiusKm, useImperial, 5)
+          + Model.formatWatchRadius(event.radiusKm, useImperial)
           + " awareness area has reached "
           + Math.round(Number(event.chance || 0))
           + "% formation chance. No local track is available yet."

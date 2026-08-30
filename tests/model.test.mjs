@@ -49,6 +49,24 @@ assert.equal(model.formatMovement(storm, false), "WNW at 19 km/h")
 assert.equal(model.systemMetric(storm, false), "169 km/h")
 assert.equal(model.formatDistanceKm(1000, false, 5), "1,000 km")
 assert.equal(model.formatDistanceKm(1000, true, 5), "620 mi")
+const imperialWatchRadiusOptions = model.watchRadiusOptions(true)
+assert.deepEqual(
+  Array.from(imperialWatchRadiusOptions, option => option.label),
+  ["150 mi", "300 mi", "450 mi", "600 mi", "900 mi", "1,200 mi"]
+)
+assert.deepEqual(
+  Array.from(imperialWatchRadiusOptions, option => option.value),
+  ["241", "483", "724", "966", "1448", "1931"]
+)
+assert.equal(model.defaultWatchRadiusKm(true), 966)
+assert.equal(model.defaultWatchRadiusKm(false), 1000)
+assert.equal(model.formatWatchRadius(966, true), "600 mi")
+assert.equal(model.formatWatchRadius(1000, true), "620 mi")
+assert.equal(model.formatWatchRadius(1000, false), "1,000 km")
+assert.equal(
+  model.watchRadiusOptions(true, 1000).find(option => option.value === "1000").label,
+  "620 mi · current"
+)
 assert.equal(model.watchDistanceLabel(160.9344, true), "100 mi away")
 assert.equal(model.advisoryLabel(storm, Date.parse("2026-08-28T18:00:00Z")), "Advisory 14 · 3h ago")
 assert.equal(model.forecastHourLabel({ forecastHour: 0 }), "Now")
