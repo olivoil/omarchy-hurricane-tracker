@@ -1652,10 +1652,11 @@ Item {
 
             Rectangle {
               width: parent.width
-              height: Style.space(76)
+              height: trackerMenuIntroduction.implicitHeight + Style.space(30)
               color: root.shellSurface
 
               Column {
+                id: trackerMenuIntroduction
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(14)
                 anchors.right: parent.right
