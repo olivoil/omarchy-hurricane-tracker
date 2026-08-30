@@ -895,19 +895,12 @@ function incompleteForecastSystemKeys(storms) {
 }
 
 function stabilizedAlertSnapshots(previous, current, incompleteOutlookBasins,
-    previouslyIncompleteOutlookBasins, incompleteSystemKeys) {
+    incompleteSystemKeys) {
   var before = copySnapshot(previous)
   var after = copySnapshot(current)
   var incompleteOutlooks = stringSet(incompleteOutlookBasins)
-  var recoveredOutlooks = stringSet(previouslyIncompleteOutlookBasins)
   var incompleteSystems = stringSet(incompleteSystemKeys)
   var key
-  for (key in after) {
-    var currentItem = after[key]
-    if (currentItem && currentItem.kind === "outlook"
-        && recoveredOutlooks[String(currentItem.basin || "")] && !(key in before))
-      before[key] = currentItem
-  }
   for (key in before) {
     var previousItem = before[key]
     if (!previousItem) continue
@@ -916,7 +909,9 @@ function stabilizedAlertSnapshots(previous, current, incompleteOutlookBasins,
     var systemKey = previousItem.scope === "place"
       ? String(previousItem.systemKey || "") : String(previousItem.key || "")
     var preserveSystem = previousItem.kind === "storm" && incompleteSystems[systemKey]
-    if (preserveOutlook || preserveSystem) after[key] = previousItem
+    if ((preserveOutlook || preserveSystem)
+        && (!after[key] || watchSnapshotRank(after[key]) < watchSnapshotRank(previousItem)))
+      after[key] = previousItem
   }
   return { before: before, current: after }
 }

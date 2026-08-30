@@ -43,7 +43,6 @@ Item {
   property var placeAlertBaseline: ({})
   property bool placeAlertsArmed: false
   property string appliedPlaceAlertConfig: ""
-  property var previouslyIncompleteOutlookBasins: []
   property var pendingNotification: null
   property string watchProcessOutput: ""
   property string watchProcessError: ""
@@ -446,14 +445,12 @@ Item {
     alertBaseline = currentAlertSnapshot()
     alertsArmed = alertsEnabled && hasLoaded && !stale && status === "fresh"
     appliedAlertConfig = alertConfigKey
-    previouslyIncompleteOutlookBasins = incompleteOutlookBasins.slice()
   }
 
   function armPlaceAlertsQuietly() {
     placeAlertBaseline = currentPlaceAlertSnapshot()
     placeAlertsArmed = placeAlertsEnabled && hasLoaded && !stale && status === "fresh"
     appliedPlaceAlertConfig = placeAlertConfigKey
-    previouslyIncompleteOutlookBasins = incompleteOutlookBasins.slice()
   }
 
   function evaluateAlerts() {
@@ -464,7 +461,6 @@ Item {
       placeAlertBaseline = ({})
       placeAlertsArmed = false
       appliedPlaceAlertConfig = placeAlertConfigKey
-      previouslyIncompleteOutlookBasins = []
       return
     }
     var events = []
@@ -476,8 +472,7 @@ Item {
         alertsArmed = true
       } else {
         var stableAlerts = Model.stabilizedAlertSnapshots(
-          alertBaseline, current, incompleteOutlookBasins,
-          previouslyIncompleteOutlookBasins, [])
+          alertBaseline, current, incompleteOutlookBasins, [])
         events = events.concat(Model.alertEvents(stableAlerts.before, stableAlerts.current))
         alertBaseline = stableAlerts.current
       }
@@ -496,7 +491,7 @@ Item {
       } else {
         var stablePlaceAlerts = Model.stabilizedAlertSnapshots(
           placeAlertBaseline, placeCurrent, incompleteOutlookBasins,
-          previouslyIncompleteOutlookBasins, incompleteForecastKeys)
+          incompleteForecastKeys)
         events = events.concat(Model.watchAlertEvents(
           stablePlaceAlerts.before, stablePlaceAlerts.current))
         placeAlertBaseline = stablePlaceAlerts.current
@@ -507,7 +502,6 @@ Item {
       placeAlertsArmed = false
       appliedPlaceAlertConfig = placeAlertConfigKey
     }
-    previouslyIncompleteOutlookBasins = incompleteOutlookBasins.slice()
     events = Model.coalesceAlertEvents(events)
     if (events.length > 0) notifyEvents(events)
   }
