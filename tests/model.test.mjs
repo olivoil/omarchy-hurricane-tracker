@@ -134,6 +134,7 @@ assert.deepEqual(
   { ...model.normalizeWatchPlace({ ...home, name: "  Home\nbase  ", radiusKm: 9999 }) },
   { ...home, name: "Home base", radiusKm: 2000 }
 )
+assert.equal(model.normalizeWatchPlace({ ...home, radiusKm: undefined }).radiusKm, 1000)
 assert.ok(model.haversineDistanceKm(25.7617, -80.1918, 27.9506, -82.4572) > 250)
 assert.ok(model.haversineDistanceKm(25.7617, -80.1918, 27.9506, -82.4572) < 400)
 const watchCircle = model.watchCircleCoordinates(home, 32)
@@ -165,6 +166,77 @@ assert.equal(formationSnapshot["place:family|outlook:al-outlook-1"].meetsThresho
 assert.equal(model.watchPlaceSummaries([], [developing], [family], "Medium (40%)")[0].state, "heads-up")
 const lowFormationSnapshot = model.watchAlertSnapshot([], [outlook], [family], "Medium (40%)")
 assert.equal(model.watchAlertEvents(lowFormationSnapshot, formationSnapshot).length, 1)
+
+const cancun = {
+  id: "cancun",
+  name: "Cancun",
+  latitude: 21.1225,
+  longitude: -86.8261,
+  radiusKm: 1000
+}
+const caribbeanFormation = {
+  ...outlook,
+  id: "al-outlook-caribbean",
+  name: "Eastern Atlantic wave",
+  latitude: 15.5,
+  longitude: -50,
+  sevenDayChance: 70,
+  area: [[[-84, 18], [-77, 18], [-77, 25], [-84, 25], [-84, 18]]]
+}
+const caribbeanHeadsUp = model.watchAlertSnapshot(
+  [], [caribbeanFormation], [cancun], "High (70%)"
+)
+assert.equal(caribbeanHeadsUp["place:cancun|outlook:al-outlook-caribbean"].attentionLevel, "heads-up")
+assert.equal(model.watchPlaceSummaries(
+  [], [caribbeanFormation], [cancun], "High (70%)"
+)[0].state, "heads-up")
+
+const caribbeanMonitor = {
+  ...storm,
+  id: "al022026",
+  name: "Bea",
+  latitude: 17.3,
+  longitude: -59.6,
+  track: [
+    { forecastHour: 0, latitude: 17.3, longitude: -59.6 },
+    { forecastHour: 72, latitude: 20.5, longitude: -72.5 },
+    { forecastHour: 120, latitude: 22.2, longitude: -81.5 }
+  ],
+  cone: []
+}
+const monitorSnapshot = model.watchAlertSnapshot([caribbeanMonitor], [], [cancun], "Medium (40%)")
+assert.equal(monitorSnapshot["place:cancun|storm:al022026"].attentionLevel, "monitor")
+assert.equal(model.watchPlaceSummaries([caribbeanMonitor], [], [cancun], "Medium (40%)")[0].state, "monitor")
+
+const yucatanApproach = {
+  ...caribbeanMonitor,
+  latitude: 20.8,
+  longitude: -80.2,
+  track: [
+    { forecastHour: 0, latitude: 20.8, longitude: -80.2 },
+    { forecastHour: 24, latitude: 21.0, longitude: -83.0 },
+    { forecastHour: 48, latitude: 21.2, longitude: -86.0 }
+  ]
+}
+const urgentSnapshot = model.watchAlertSnapshot([yucatanApproach], [], [cancun], "Medium (40%)")
+assert.equal(urgentSnapshot["place:cancun|storm:al022026"].attentionLevel, "urgent")
+const urgentSummary = model.watchPlaceSummaries([yucatanApproach], [], [cancun], "Medium (40%)")[0]
+assert.equal(urgentSummary.state, "urgent")
+assert.match(urgentSummary.detail, /closest forecast .* · ~2d$/)
+assert.equal(model.watchAlertEvents(monitorSnapshot, urgentSnapshot)[0].attentionLevel, "urgent")
+assert.equal(model.watchAlertEvents(urgentSnapshot, urgentSnapshot).length, 0)
+
+const yucatanDeparting = {
+  ...yucatanApproach,
+  track: [
+    { forecastHour: 0, latitude: 20.8, longitude: -80.2 },
+    { forecastHour: 24, latitude: 20.5, longitude: -76.0 },
+    { forecastHour: 48, latitude: 20.0, longitude: -72.0 }
+  ]
+}
+assert.equal(model.watchAlertSnapshot(
+  [yucatanDeparting], [], [cancun], "Medium (40%)"
+)["place:cancun|storm:al022026"].attentionLevel, "monitor")
 
 assert.equal(model.safeOfficialUrl("https://www.nhc.noaa.gov/text/MIATCPAT1.shtml").length > 0, true)
 assert.equal(model.safeOfficialUrl("http://www.nhc.noaa.gov/text"), "")

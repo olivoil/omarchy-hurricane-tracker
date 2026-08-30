@@ -876,7 +876,7 @@ def normalized_watch_place(value: Any) -> dict[str, Any] | None:
     name = safe_text(value.get("name"), 40)
     latitude = number(value.get("latitude"))
     longitude = number(value.get("longitude"))
-    radius = number(value.get("radiusKm"), 500)
+    radius = number(value.get("radiusKm"), 1000)
     if (
         not identifier
         or not name
@@ -891,7 +891,7 @@ def normalized_watch_place(value: Any) -> dict[str, Any] | None:
         "name": name,
         "latitude": round(latitude, 5),
         "longitude": round(longitude, 5),
-        "radiusKm": round(max(50, min(2000, radius or 500))),
+        "radiusKm": round(max(50, min(2000, radius or 1000))),
     }
 
 

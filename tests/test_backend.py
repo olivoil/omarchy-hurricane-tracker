@@ -240,6 +240,17 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(saved["places"][0]["radiusKm"], 2000)
             self.assertEqual(omanado.read_watch_config(path), saved)
 
+    def test_watch_place_radius_defaults_to_forecast_awareness_range(self):
+        place = omanado.normalized_watch_place(
+            {
+                "id": "cancun",
+                "name": "Cancún",
+                "latitude": 21.1619,
+                "longitude": -86.8515,
+            }
+        )
+        self.assertEqual(place["radiusKm"], 1000)
+
 
 if __name__ == "__main__":
     unittest.main()

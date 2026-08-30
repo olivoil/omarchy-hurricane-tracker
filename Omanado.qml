@@ -23,7 +23,7 @@ Item {
   property string draftPlaceName: ""
   property real draftPlaceLatitude: 999
   property real draftPlaceLongitude: 999
-  property int draftPlaceRadiusKm: 500
+  property int draftPlaceRadiusKm: 1000
   property string placeEditorError: ""
   property string pendingRemovePlaceId: ""
   property int clockTick: 0
@@ -50,9 +50,19 @@ Item {
     var count = 0
     for (var i = 0; i < watchPlaceSummaries.length; i++) {
       var state = String(watchPlaceSummaries[i] && watchPlaceSummaries[i].state || "")
-      if (state === "monitor" || state === "heads-up") count++
+      if (state === "urgent" || state === "monitor" || state === "heads-up") count++
     }
     return count
+  }
+  readonly property string alertAttentionState: {
+    var strongest = ""
+    for (var i = 0; i < watchPlaceSummaries.length; i++) {
+      var state = String(watchPlaceSummaries[i] && watchPlaceSummaries[i].state || "")
+      if (state === "urgent") return "urgent"
+      if (state === "monitor") strongest = "monitor"
+      else if (state === "heads-up" && strongest === "") strongest = "heads-up"
+    }
+    return strongest
   }
   readonly property int dataFeedCount: 1
   readonly property var trackerDefinitions: [
@@ -95,8 +105,8 @@ Item {
   property color border: Color.menu.border
   property color accent: Color.accent
   property color urgent: Color.urgent
-  property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
-  property color faint: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.34)
+  property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.72)
+  property color faint: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.50)
   property color shellSurface: blendColor(background, foreground, lightTheme ? 0.018 : 0.025)
   property color raisedSurface: blendColor(background, foreground, lightTheme ? 0.045 : 0.065)
   property color softSurface: blendColor(background,
@@ -114,12 +124,21 @@ Item {
   property color mapCone: accent
   property color mapTrack: foreground
 
+  readonly property int typeMicro: Math.max(10, Style.font.caption)
+  readonly property int typeCaption: Math.max(11, Style.font.bodySmall)
+  readonly property int typeBody: Math.max(12, Style.font.body)
+  readonly property int typeSubtitle: Math.max(13, Style.font.subtitle)
+  readonly property int typeHeading: Math.max(16, Style.font.heading)
+  readonly property int minimumTouchTarget: Style.space(40)
+  readonly property color alertAttentionColor: alertAttentionState === "urgent" ? root.urgent
+    : (alertAttentionState === "monitor" ? "#e9be62" : root.accent)
+
   readonly property int cardWidth: Math.min(Style.space(1660), panel.width - Style.gapsOut * 2)
   readonly property int cardHeight: Math.min(Style.space(980), panel.height - Style.gapsOut * 2)
   readonly property int headerHeight: Style.space(68)
-  readonly property int sidebarWidth: Math.min(Style.space(410),
-    Math.max(Style.space(330), Math.round(cardWidth * 0.25)))
-  readonly property int sidebarFooterHeight: Style.space(34)
+  readonly property int sidebarWidth: Math.min(Style.space(440),
+    Math.max(Style.space(350), Math.round(cardWidth * 0.27)))
+  readonly property int sidebarFooterHeight: Style.space(44)
   readonly property int timelineHeight: Style.space(100)
 
   function blendColor(first, second, amount) {
@@ -169,6 +188,8 @@ Item {
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
+    if (payload.alerts === true) sidebarMode = "alerts"
+    else if (payload.activity === true) sidebarMode = "activity"
     if (payload.stormId) selectedKey = "storm:" + String(payload.stormId)
     if (payload.outlookId) selectedKey = "outlook:" + String(payload.outlookId)
     opened = true
@@ -341,7 +362,7 @@ Item {
     draftPlaceName = ""
     draftPlaceLatitude = 999
     draftPlaceLongitude = 999
-    draftPlaceRadiusKm = 500
+    draftPlaceRadiusKm = 1000
     placeEditorError = ""
     Qt.callLater(function() { placeNameField.forceActiveFocus() })
   }
@@ -404,7 +425,8 @@ Item {
   }
 
   function watchPlaceRuleLabel(place) {
-    return "Cyclones: cone or formation within " + Math.round(Number(place && place.radiusKm || 500)) + " km"
+    return "Forecast cone or 7-day formation area within "
+      + Math.round(Number(place && place.radiusKm || 1000)) + " km"
   }
 
   function watchPlaceScopeLabel(summary) {
@@ -467,8 +489,9 @@ Item {
 
   function placeStateColor(summary) {
     if (!summary) return dim
-    if (summary.state === "monitor") return accent
-    if (summary.state === "heads-up") return "#e9be62"
+    if (summary.state === "urgent") return root.urgent
+    if (summary.state === "monitor") return "#e9be62"
+    if (summary.state === "heads-up") return root.accent
     return dim
   }
 
@@ -577,6 +600,10 @@ Item {
           } else if (event.key === Qt.Key_R) {
             root.refresh()
             event.accepted = true
+          } else if (event.key === Qt.Key_A) {
+            if (root.sidebarMode === "alerts") root.showActivity()
+            else root.showAlerts()
+            event.accepted = true
           } else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) {
             stormMap.zoomIn()
             event.accepted = true
@@ -646,7 +673,7 @@ Item {
             textFormat: Text.PlainText
             color: root.dim
             font.family: Style.font.menuFamily
-            font.pixelSize: Math.max(8, Style.font.caption - 1)
+            font.pixelSize: root.typeMicro
             font.letterSpacing: 0.6
           }
         }
@@ -656,8 +683,8 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(34)
-          height: Style.space(34)
+          width: root.minimumTouchTarget
+          height: root.minimumTouchTarget
           iconText: "\uf00d"
           tooltipText: "Close (Esc)"
           focusable: true
@@ -675,13 +702,15 @@ Item {
           anchors.rightMargin: Style.spacing.md
           anchors.verticalCenter: parent.verticalCenter
           width: alertButtonContent.implicitWidth + Style.space(18)
-          height: Style.space(32)
+          height: root.minimumTouchTarget
           radius: Style.space(7)
           bordered: true
           selected: root.sidebarMode === "alerts"
-          tooltipText: root.alertDestinationCount === 1
-            ? "Manage alerts for 1 watched location"
-            : "Manage alerts for " + root.alertDestinationCount + " watched locations"
+          tooltipText: root.alertUpdateCount === 0
+            ? "Manage alerts (A). No watched locations need attention"
+            : (root.alertUpdateCount === 1
+              ? "1 watched location needs attention"
+              : String(root.alertUpdateCount) + " watched locations need attention")
           focusable: true
           foreground: root.foreground
           accent: root.accent
@@ -696,7 +725,7 @@ Item {
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: "◇"
-              color: root.accent
+              color: root.alertUpdateCount > 0 ? root.alertAttentionColor : root.accent
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.body
               font.bold: true
@@ -707,24 +736,25 @@ Item {
               color: alertsButton.selected
                 ? Style.selectedStateColor(root.foreground, root.accent) : root.foreground
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(8, Style.font.caption - 1)
+              font.pixelSize: root.typeCaption
               font.bold: true
               font.letterSpacing: 0.8
             }
             Rectangle {
-              visible: root.alertDestinationCount > 0
+              visible: root.alertUpdateCount > 0
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(17)
               height: width
               radius: width / 2
-              color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14)
+              color: Qt.rgba(root.alertAttentionColor.r, root.alertAttentionColor.g,
+                root.alertAttentionColor.b, 0.18)
 
               Text {
                 anchors.centerIn: parent
-                text: String(root.alertDestinationCount)
-                color: root.accent
+                text: String(root.alertUpdateCount)
+                color: root.alertAttentionColor
                 font.family: Style.font.menuFamily
-                font.pixelSize: Math.max(7, Style.font.caption - 2)
+                font.pixelSize: root.typeMicro
                 font.bold: true
               }
             }
@@ -805,7 +835,7 @@ Item {
                 text: root.draftWatchPlace ? "CLICK TO MOVE THE WATCH POINT" : "CLICK TO PLACE THE WATCH POINT"
                 color: root.mapText
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: root.typeBody
                 font.bold: true
                 font.letterSpacing: 0.35
               }
@@ -813,7 +843,7 @@ Item {
                 text: "Drag to move the globe · scroll to zoom"
                 color: root.mapMuted
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
               }
             }
           }
@@ -866,7 +896,7 @@ Item {
                 textFormat: Text.PlainText
                 color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.foreground
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
                 font.bold: true
               }
             }
@@ -898,7 +928,7 @@ Item {
                 color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.dim
                 elide: Text.ElideRight
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
               }
             }
 
@@ -912,7 +942,7 @@ Item {
               color: root.selectedSystem && Array.isArray(root.selectedSystem.dataWarnings)
                 && root.selectedSystem.dataWarnings.length > 0 ? "#e9be62" : root.dim
               font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
+              font.pixelSize: root.typeCaption
             }
           }
 
@@ -971,7 +1001,7 @@ Item {
                     color: root.dim
                     elide: Text.ElideRight
                     font.family: Style.font.menuFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: root.typeMicro
                     font.bold: true
                     font.letterSpacing: 0.35
                   }
@@ -982,7 +1012,7 @@ Item {
                     color: root.foreground
                     elide: Text.ElideRight
                     font.family: Style.font.menuFamily
-                    font.pixelSize: Style.font.bodySmall
+                    font.pixelSize: root.typeBody
                     font.bold: true
                   }
                 }
@@ -1018,13 +1048,14 @@ Item {
             elide: Text.ElideRight
             color: root.mapText
             font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: root.typeCaption
           }
           Button {
             id: retryButton
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.xs
             anchors.verticalCenter: parent.verticalCenter
+            height: root.minimumTouchTarget
             text: "Retry"
             focusable: true
             foreground: root.mapText
@@ -1133,7 +1164,7 @@ Item {
                 text: root.selectedOutlook ? "Formation area" : "Forecast cone"
                 color: root.mapMuted
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
               }
             }
             Row {
@@ -1149,7 +1180,7 @@ Item {
                 text: "Center track"
                 color: root.mapMuted
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
               }
             }
           }
@@ -1167,6 +1198,8 @@ Item {
             iconText: "\uf067"
             tooltipText: "Zoom in (+)"
             focusable: true
+            width: root.minimumTouchTarget
+            height: root.minimumTouchTarget
             foreground: root.mapText
             background: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.92)
             onClicked: stormMap.zoomIn()
@@ -1175,6 +1208,8 @@ Item {
             iconText: "\uf068"
             tooltipText: "Zoom out (-)"
             focusable: true
+            width: root.minimumTouchTarget
+            height: root.minimumTouchTarget
             foreground: root.mapText
             background: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.92)
             onClicked: stormMap.zoomOut()
@@ -1184,6 +1219,8 @@ Item {
             tooltipText: root.sidebarMode === "alerts" && root.selectedPlace
               ? "Fit selected watch area (F)" : "Fit selected system (F)"
             focusable: true
+            width: root.minimumTouchTarget
+            height: root.minimumTouchTarget
             foreground: root.mapText
             background: Qt.rgba(root.mapDeepOcean.r, root.mapDeepOcean.g, root.mapDeepOcean.b, 0.92)
             onClicked: {
@@ -1196,6 +1233,8 @@ Item {
             iconText: "\uf0ac"
             tooltipText: "Show the whole globe (G)"
             focusable: true
+            width: root.minimumTouchTarget
+            height: root.minimumTouchTarget
             foreground: root.mapText
             background: root.background
             onClicked: stormMap.showGlobe()
@@ -1262,7 +1301,7 @@ Item {
                 text: Model.forecastHourLabel(forecast)
                 color: root.mapText
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: root.typeBody
                 font.bold: true
               }
               Text {
@@ -1275,7 +1314,7 @@ Item {
                 text: Model.forecastTimeLabel(forecast)
                 color: root.mapMuted
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeMicro
               }
               Text {
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -1284,7 +1323,7 @@ Item {
                 text: String(forecast.windMph || 0) + " mph"
                 color: Model.severityColor(forecast)
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
                 font.bold: true
               }
             }
@@ -1322,7 +1361,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
-          height: visible ? Style.space(56) : 0
+          height: visible ? Style.space(60) : 0
           color: root.shellSurface
 
           BorderSurface {
@@ -1332,7 +1371,7 @@ Item {
             anchors.leftMargin: Style.spacing.md
             anchors.verticalCenter: parent.verticalCenter
             width: trackerButtonContent.implicitWidth + Style.spacing.md * 2
-            height: Style.space(34)
+            height: root.minimumTouchTarget
             radius: Style.space(6)
             color: root.trackerMenuOpen || hot || activeFocus ? root.raisedSurface : "transparent"
             borderSpec: activeFocus
@@ -1372,7 +1411,7 @@ Item {
                 text: "\uf078"
                 color: root.dim
                 font.family: Style.font.family
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeMicro
                 rotation: root.trackerMenuOpen ? 180 : 0
 
                 Behavior on rotation { NumberAnimation { duration: 140 } }
@@ -1398,7 +1437,7 @@ Item {
             text: String(root.systems.length) + " TRACKED"
             color: root.dim
             font.family: Style.font.menuFamily
-            font.pixelSize: Math.max(8, Style.font.caption - 1)
+            font.pixelSize: root.typeMicro
             font.bold: true
             font.letterSpacing: 0.45
           }
@@ -1455,7 +1494,7 @@ Item {
                   wrapMode: Text.WordWrap
                   color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeCaption
                   lineHeight: 1.45
                 }
               }
@@ -1593,7 +1632,7 @@ Item {
                       color: root.foreground
                       elide: Text.ElideRight
                       font.family: Style.font.menuFamily
-                      font.pixelSize: Style.font.bodySmall
+                      font.pixelSize: root.typeBody
                       font.bold: true
                       font.letterSpacing: 0.65
                     }
@@ -1604,7 +1643,7 @@ Item {
                       wrapMode: Text.WordWrap
                       color: root.dim
                       font.family: Style.font.menuFamily
-                      font.pixelSize: Math.max(8, Style.font.caption - 2)
+                      font.pixelSize: root.typeCaption
                       lineHeight: 1.4
                     }
                   }
@@ -1615,7 +1654,7 @@ Item {
                     text: modelData.state
                     color: modelData.available ? root.dim : root.faint
                     font.family: Style.font.menuFamily
-                    font.pixelSize: Math.max(8, Style.font.caption - 2)
+                    font.pixelSize: root.typeMicro
                     font.bold: true
                     font.letterSpacing: 0.35
                   }
@@ -1644,8 +1683,8 @@ Item {
             property bool isSelected: system && system.key === root.selectedKey
             readonly property color itemColor: system ? root.systemColor(system) : root.dim
             width: systemList.width
-            height: rowData.kind === "region" ? Style.space(44)
-              : (rowData.kind === "empty" ? Style.space(28) : Style.space(74))
+            height: rowData.kind === "region" ? Style.space(48)
+              : (rowData.kind === "empty" ? Style.space(34) : Style.space(82))
             color: isSelected ? root.raisedSurface
               : (system && rowMouse.containsMouse
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
@@ -1672,7 +1711,7 @@ Item {
               color: root.foreground
               elide: Text.ElideRight
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(8, Style.font.caption - 1)
+              font.pixelSize: root.typeCaption
               font.bold: true
               font.letterSpacing: 0.7
             }
@@ -1691,7 +1730,7 @@ Item {
               }
               color: root.dim
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(8, Style.font.caption - 2)
+              font.pixelSize: root.typeMicro
               font.bold: true
             }
 
@@ -1702,14 +1741,15 @@ Item {
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
+              height: root.minimumTouchTarget
               text: "View all"
               iconText: "\uf05b"
               tooltipText: "Fit every system in " + String(rowData.name || "this region")
               focusable: true
               foreground: root.foreground
               accent: root.accent
-              fontSize: Math.max(8, Style.font.caption - 2)
-              iconSize: Math.max(8, Style.font.caption - 2)
+              fontSize: root.typeCaption
+              iconSize: root.typeMicro
               horizontalPadding: Style.space(7)
               verticalPadding: Style.space(4)
               z: 2
@@ -1725,7 +1765,7 @@ Item {
               text: "No current systems"
               color: root.dim
               font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
+              font.pixelSize: root.typeCaption
             }
 
             Rectangle {
@@ -1748,7 +1788,7 @@ Item {
                   : String(system.sevenDayChance || 0) + "%") : ""
                 color: itemColor
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: root.typeCaption
                 font.bold: true
               }
             }
@@ -1769,7 +1809,7 @@ Item {
                 color: root.foreground
                 elide: Text.ElideRight
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: root.typeBody
                 font.bold: true
               }
               Text {
@@ -1779,7 +1819,7 @@ Item {
                 color: root.dim
                 elide: Text.ElideRight
                 font.family: Style.font.menuFamily
-                font.pixelSize: Math.max(8, Style.font.caption - 2)
+                font.pixelSize: root.typeCaption
               }
             }
 
@@ -1829,9 +1869,9 @@ Item {
               anchors.left: parent.left
               anchors.leftMargin: Style.space(13)
               anchors.top: parent.top
-              anchors.topMargin: Style.space(8)
+              anchors.topMargin: Style.space(2)
               width: alertsBackContent.implicitWidth
-              height: Style.space(24)
+              height: root.minimumTouchTarget
               activeFocusOnTab: true
 
               readonly property bool hot: activeFocus || alertsBackHitArea.containsMouse
@@ -1860,16 +1900,16 @@ Item {
                   text: "\uf053"
                   color: alertsBack.hot ? root.accent : root.dim
                   font.family: Style.font.family
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeCaption
 
                   Behavior on color { ColorAnimation { duration: 100 } }
                 }
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  text: root.editingWatchPlace ? "WATCH ALERTS" : "BACK TO ACTIVITY"
+                  text: root.editingWatchPlace ? "WATCHED LOCATIONS" : "BACK TO ACTIVITY"
                   color: alertsBack.hot ? root.foreground : root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeCaption
                   font.letterSpacing: 0.15
 
                   Behavior on color { ColorAnimation { duration: 100 } }
@@ -1908,7 +1948,7 @@ Item {
               anchors.bottom: parent.bottom
               anchors.bottomMargin: Style.space(11)
               text: root.editingWatchPlace
-                ? (root.editingPlaceId ? "EDIT LOCATION" : "ADD WATCHED LOCATION") : "WATCH ALERTS"
+                ? (root.editingPlaceId ? "EDIT LOCATION" : "ADD WATCHED LOCATION") : "WATCHED LOCATIONS"
               color: root.foreground
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.title
@@ -1925,7 +1965,7 @@ Item {
                   ? " LOCATION" : " LOCATIONS")
               color: root.dim
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(8, Style.font.caption - 1)
+              font.pixelSize: root.typeMicro
               font.bold: true
               font.letterSpacing: 0.4
             }
@@ -1973,21 +2013,21 @@ Item {
                   text: "LOCATION NAME"
                   color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeMicro
                   font.bold: true
                   font.letterSpacing: 0.55
                 }
                 TextField {
                   id: placeNameField
                   width: parent.width
-                  height: Style.space(38)
+                  height: root.minimumTouchTarget
                   text: root.draftPlaceName
                   placeholderText: "Home, Dad, Cancún"
                   maximumLength: 40
                   foreground: root.foreground
                   accent: root.accent
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 1)
+                  font.pixelSize: root.typeBody
                   onTextEdited: root.draftPlaceName = text
                   Keys.onPressed: function(event) {
                     if (event.key === Qt.Key_Escape) {
@@ -2009,13 +2049,13 @@ Item {
                   text: "MAP POSITION"
                   color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeMicro
                   font.bold: true
                   font.letterSpacing: 0.55
                 }
                 BorderSurface {
                   width: parent.width
-                  height: Style.space(38)
+                  height: root.minimumTouchTarget
                   radius: Style.space(7)
                   color: root.deepSurface
                   borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
@@ -2041,7 +2081,7 @@ Item {
                       text: root.draftCoordinateLabel()
                       color: root.draftWatchPlace ? root.foreground : root.dim
                       font.family: Style.font.menuFamily
-                      font.pixelSize: Math.max(8, Style.font.caption - 1)
+                      font.pixelSize: root.typeCaption
                       font.bold: root.draftWatchPlace !== null
                       elide: Text.ElideRight
                     }
@@ -2054,9 +2094,9 @@ Item {
                     : "Click the globe to place the watch point. Alert areas are shown only while editing."
                   textFormat: Text.PlainText
                   wrapMode: Text.WordWrap
-                  color: root.faint
+                  color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(7, Style.font.caption - 3)
+                  font.pixelSize: root.typeCaption
                   lineHeight: 1.45
                 }
                 Text {
@@ -2068,7 +2108,7 @@ Item {
                   wrapMode: Text.WordWrap
                   color: "#e9be62"
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeCaption
                   lineHeight: 1.4
                 }
               }
@@ -2081,7 +2121,7 @@ Item {
                   text: "PROACTIVE ALERT RULES"
                   color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeCaption
                   font.bold: true
                   font.letterSpacing: 0.55
                 }
@@ -2113,7 +2153,7 @@ Item {
                         text: "CYCLONES"
                         color: root.foreground
                         font.family: Style.font.menuFamily
-                        font.pixelSize: Math.max(8, Style.font.caption - 1)
+                        font.pixelSize: root.typeMicro
                         font.bold: true
                       }
                       Row {
@@ -2133,7 +2173,7 @@ Item {
                           text: "ACTIVE"
                           color: root.dim
                           font.family: Style.font.menuFamily
-                          font.pixelSize: Math.max(7, Style.font.caption - 3)
+                          font.pixelSize: root.typeMicro
                           font.bold: true
                           font.letterSpacing: 0.5
                         }
@@ -2152,21 +2192,23 @@ Item {
                           text: "WITHIN"
                           color: root.dim
                           font.family: Style.font.menuFamily
-                          font.pixelSize: Math.max(7, Style.font.caption - 3)
+                          font.pixelSize: root.typeMicro
                           font.bold: true
                           font.letterSpacing: 0.45
                         }
                         Dropdown {
                           width: parent.width
-                          height: Style.space(34)
+                          height: root.minimumTouchTarget
                           showLabel: false
-                          rowHeight: Style.space(34)
+                          rowHeight: root.minimumTouchTarget
                           value: String(root.draftPlaceRadiusKm)
                           options: [
                             { value: "250", label: "250 km" },
                             { value: "500", label: "500 km" },
                             { value: "750", label: "750 km" },
-                            { value: "1000", label: "1,000 km" }
+                            { value: "1000", label: "1,000 km" },
+                            { value: "1500", label: "1,500 km" },
+                            { value: "2000", label: "2,000 km" }
                           ]
                           foreground: root.foreground
                           background: root.deepSurface
@@ -2185,13 +2227,13 @@ Item {
                           text: "FORMATION"
                           color: root.dim
                           font.family: Style.font.menuFamily
-                          font.pixelSize: Math.max(7, Style.font.caption - 3)
+                          font.pixelSize: root.typeMicro
                           font.bold: true
                           font.letterSpacing: 0.45
                         }
                         BorderSurface {
                           width: parent.width
-                          height: Style.space(34)
+                          height: root.minimumTouchTarget
                           radius: Style.space(7)
                           color: root.deepSurface
                           borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
@@ -2204,7 +2246,7 @@ Item {
                               ? Model.alertThresholdValue(root.tracker.formationThreshold) : 40) + "%+"
                             color: root.foreground
                             font.family: Style.font.menuFamily
-                            font.pixelSize: Math.max(8, Style.font.caption - 1)
+                            font.pixelSize: root.typeMicro
                           }
                           Text {
                             anchors.right: parent.right
@@ -2213,7 +2255,7 @@ Item {
                             text: "APP"
                             color: root.faint
                             font.family: Style.font.menuFamily
-                            font.pixelSize: Math.max(6, Style.font.caption - 4)
+                            font.pixelSize: root.typeMicro
                             font.bold: true
                             font.letterSpacing: 0.4
                           }
@@ -2232,7 +2274,7 @@ Item {
                   wrapMode: Text.WordWrap
                   color: root.urgent
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 1)
+                  font.pixelSize: root.typeCaption
                 }
               }
 
@@ -2269,7 +2311,7 @@ Item {
 
                 Button {
                   width: (parent.width - parent.spacing) / 2
-                  height: Style.space(39)
+                  height: root.minimumTouchTarget
                   text: "CANCEL"
                   radius: Style.space(7)
                   background: root.raisedSurface
@@ -2278,12 +2320,12 @@ Item {
                   foreground: root.foreground
                   accent: root.accent
                   fontFamily: Style.font.menuFamily
-                  fontSize: Math.max(8, Style.font.caption - 2)
+                  fontSize: root.typeCaption
                   onClicked: root.cancelWatchPlaceEditor()
                 }
                 BorderSurface {
                   width: (parent.width - parent.spacing) / 2
-                  height: Style.space(39)
+                  height: root.minimumTouchTarget
                   radius: Style.space(7)
                   color: root.raisedSurface
                   borderSpec: Border.surfaceSpec("menu", "border",
@@ -2299,7 +2341,7 @@ Item {
                     foreground: root.foreground
                     accent: root.accent
                     fontFamily: Style.font.menuFamily
-                    fontSize: Math.max(8, Style.font.caption - 2)
+                    fontSize: root.typeCaption
                     onClicked: root.saveWatchPlace()
                   }
                 }
@@ -2338,9 +2380,9 @@ Item {
                     ? String(root.alertUpdateCount) + (root.alertUpdateCount === 1
                       ? " LOCATION NEEDS ATTENTION" : " LOCATIONS NEED ATTENTION")
                     : "ALL LOCATIONS QUIET")
-                color: root.alertUpdateCount > 0 ? "#e9be62" : root.accent
+                color: root.alertUpdateCount > 0 ? root.alertAttentionColor : root.accent
                 font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: root.typeCaption
                 font.bold: true
                 font.letterSpacing: 0.6
               }
@@ -2353,13 +2395,13 @@ Item {
                 anchors.top: alertsSummaryTitle.bottom
                 anchors.topMargin: Style.space(6)
                 text: root.alertDestinationCount === 0
-                  ? "Save a location for calm heads-ups when monitored activity crosses its alert rules. Dots stay visible on the map; alert areas appear only while editing."
-                  : "Locations stay quiet until monitored activity crosses one of their alert rules. Dots remain visible on the map; alert areas appear only while editing."
+                  ? "Save a location for calm heads-ups from official formation areas and forecast paths. Alert perimeters appear only while editing."
+                  : "Official formation areas and forecast paths are monitored for each location. Alert perimeters appear only while editing."
                 textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
                 color: root.dim
                 font.family: Style.font.menuFamily
-                font.pixelSize: Math.max(8, Style.font.caption - 2)
+                font.pixelSize: root.typeCaption
                 lineHeight: 1.45
               }
               Rectangle {
@@ -2386,7 +2428,7 @@ Item {
               wrapMode: Text.WordWrap
               color: "#e9be62"
               font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
+              font.pixelSize: root.typeCaption
             }
 
             ListView {
@@ -2410,7 +2452,7 @@ Item {
                 readonly property var place: summary.place
                 readonly property bool isSelected: place && place.id === root.selectedPlaceId
                 width: watchPlaceList.width
-                height: Style.space(92)
+                height: Style.space(108)
                 color: isSelected ? Style.selectedFillFor(root.foreground, root.accent)
                   : (placeMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
 
@@ -2436,7 +2478,7 @@ Item {
                   color: root.foreground
                   elide: Text.ElideRight
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: root.typeBody
                   font.bold: true
                 }
 
@@ -2447,7 +2489,7 @@ Item {
                   anchors.top: parent.top
                   anchors.topMargin: Style.space(12)
                   width: placeStatusText.implicitWidth + Style.space(12)
-                  height: Style.space(19)
+                  height: Style.space(24)
                   radius: Style.space(5)
                   color: "transparent"
                   borderSpec: Border.surfaceSpec("menu", "border",
@@ -2459,7 +2501,7 @@ Item {
                     text: String(summary.status || "QUIET")
                     color: root.placeStateColor(summary)
                     font.family: Style.font.menuFamily
-                    font.pixelSize: Math.max(7, Style.font.caption - 3)
+                    font.pixelSize: root.typeMicro
                     font.bold: true
                     font.letterSpacing: 0.55
                   }
@@ -2478,7 +2520,7 @@ Item {
                   color: root.dim
                   elide: Text.ElideRight
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 2)
+                  font.pixelSize: root.typeCaption
                 }
 
                 Column {
@@ -2486,10 +2528,10 @@ Item {
                   anchors.left: parent.left
                   anchors.leftMargin: Style.space(12)
                   anchors.right: parent.right
-                  anchors.rightMargin: placeActions.visible ? Style.space(68) : Style.space(12)
+                  anchors.rightMargin: placeActions.visible ? Style.space(96) : Style.space(12)
                   anchors.top: parent.top
-                  anchors.topMargin: Style.space(54)
-                  spacing: Style.space(4)
+                  anchors.topMargin: Style.space(60)
+                  spacing: Style.space(5)
 
                   Row {
                     width: parent.width
@@ -2509,9 +2551,9 @@ Item {
                         : root.watchPlaceRuleLabel(place)
                       textFormat: Text.PlainText
                       color: root.foreground
-                      elide: Text.ElideRight
+                      elide: summary.event ? Text.ElideMiddle : Text.ElideRight
                       font.family: Style.font.menuFamily
-                      font.pixelSize: Math.max(8, Style.font.caption - 2)
+                      font.pixelSize: root.typeCaption
                     }
                   }
                   Row {
@@ -2534,7 +2576,7 @@ Item {
                       color: root.dim
                       elide: Text.ElideRight
                       font.family: Style.font.menuFamily
-                      font.pixelSize: Math.max(8, Style.font.caption - 2)
+                      font.pixelSize: root.typeCaption
                     }
                   }
                 }
@@ -2555,9 +2597,9 @@ Item {
                     focusable: true
                     foreground: root.dim
                     accent: root.accent
-                    width: Style.space(26)
-                    height: Style.space(26)
-                    iconSize: Style.font.caption
+                    width: root.minimumTouchTarget
+                    height: root.minimumTouchTarget
+                    iconSize: root.typeCaption
                     horizontalPadding: 0
                     verticalPadding: 0
                     onClicked: root.beginEditWatchPlace(place.id)
@@ -2569,9 +2611,9 @@ Item {
                     focusable: true
                     foreground: root.pendingRemovePlaceId === place.id ? root.urgent : root.dim
                     accent: root.urgent
-                    width: Style.space(26)
-                    height: Style.space(26)
-                    iconSize: Style.font.caption
+                    width: root.minimumTouchTarget
+                    height: root.minimumTouchTarget
+                    iconSize: root.typeCaption
                     horizontalPadding: 0
                     verticalPadding: 0
                     onClicked: root.requestRemoveWatchPlace(place.id)
@@ -2616,7 +2658,7 @@ Item {
               foreground: root.foreground
               accent: root.accent
               fontFamily: Style.font.menuFamily
-              fontSize: Math.max(8, Style.font.caption - 1)
+              fontSize: root.typeCaption
               onClicked: root.beginAddWatchPlace()
             }
 
@@ -2658,7 +2700,7 @@ Item {
                   wrapMode: Text.WordWrap
                   color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: Math.max(8, Style.font.caption - 1)
+                  font.pixelSize: root.typeCaption
                   lineHeight: 1.45
                 }
               }
@@ -2717,7 +2759,7 @@ Item {
               textFormat: Text.PlainText
               color: root.dim
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(7, Style.font.caption - 3)
+              font.pixelSize: root.typeCaption
               font.bold: true
               font.letterSpacing: 0.5
             }
@@ -2727,7 +2769,7 @@ Item {
               textFormat: Text.PlainText
               color: root.faint
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(6, Style.font.caption - 4)
+              font.pixelSize: root.typeMicro
               font.bold: true
             }
           }
@@ -2739,28 +2781,28 @@ Item {
             spacing: 1
 
             Button {
-              width: Style.space(26)
-              height: Style.space(26)
+              width: root.minimumTouchTarget
+              height: root.minimumTouchTarget
               iconText: "\uf021"
               iconSpinning: root.tracker ? root.tracker.loading : false
               tooltipText: "Refresh data (R)"
               focusable: true
               foreground: root.dim
               accent: root.accent
-              iconSize: Style.font.caption
+              iconSize: root.typeCaption
               horizontalPadding: 0
               verticalPadding: 0
               onClicked: root.refresh()
             }
             Button {
-              width: Style.space(26)
-              height: Style.space(26)
+              width: root.minimumTouchTarget
+              height: root.minimumTouchTarget
               iconText: "\uf35d"
               tooltipText: "View source: National Hurricane Center"
               focusable: true
               foreground: root.dim
               accent: root.accent
-              iconSize: Style.font.caption
+              iconSize: root.typeCaption
               horizontalPadding: 0
               verticalPadding: 0
               onClicked: Quickshell.execDetached([
@@ -2804,7 +2846,7 @@ Item {
             color: root.dim
             elide: Text.ElideRight
             font.family: Style.font.menuFamily
-            font.pixelSize: Math.max(8, Style.font.caption - 2)
+            font.pixelSize: root.typeCaption
             font.bold: true
             font.letterSpacing: 0.45
           }
@@ -2834,7 +2876,7 @@ Item {
               wrapMode: Text.WordWrap
               color: root.foreground
               font.family: Style.font.menuFamily
-              font.pixelSize: Math.max(8, Style.font.caption - 1)
+              font.pixelSize: root.typeCaption
               lineHeight: 1.5
             }
 
@@ -2856,14 +2898,14 @@ Item {
               visible: root.selectedStorm !== null
               text: "Advisory"
               iconText: "\uf35d"
-              height: Style.space(30)
-              radius: Style.space(15)
+              height: root.minimumTouchTarget
+              radius: root.minimumTouchTarget / 2
               focusable: true
               bordered: true
               foreground: root.foreground
               accent: root.accent
-              fontSize: Math.max(8, Style.font.caption - 2)
-              iconSize: Math.max(8, Style.font.caption - 2)
+              fontSize: root.typeCaption
+              iconSize: root.typeMicro
               horizontalPadding: Style.space(10)
               verticalPadding: 0
               enabled: root.officialUrl(root.selectedStorm, "advisoryUrl") !== ""
@@ -2872,14 +2914,14 @@ Item {
             Button {
               text: root.selectedOutlook ? "Full outlook" : "Full discussion"
               iconText: "\uf35d"
-              height: Style.space(30)
-              radius: Style.space(15)
+              height: root.minimumTouchTarget
+              radius: root.minimumTouchTarget / 2
               focusable: true
               bordered: true
               foreground: root.foreground
               accent: root.accent
-              fontSize: Math.max(8, Style.font.caption - 2)
-              iconSize: Math.max(8, Style.font.caption - 2)
+              fontSize: root.typeCaption
+              iconSize: root.typeMicro
               horizontalPadding: Style.space(10)
               verticalPadding: 0
               enabled: root.officialUrl(root.selectedSystem, "discussionUrl") !== ""
@@ -2900,7 +2942,7 @@ Item {
             color: root.dim
             elide: Text.ElideRight
             font.family: Style.font.menuFamily
-            font.pixelSize: Math.max(8, Style.font.caption - 2)
+            font.pixelSize: root.typeCaption
           }
         }
       }

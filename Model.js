@@ -564,7 +564,7 @@ function normalizeWatchPlace(place) {
     name: name,
     latitude: Number(Number(place.latitude).toFixed(5)),
     longitude: Number(wrapLongitude(place.longitude).toFixed(5)),
-    radiusKm: Math.round(clamp(place.radiusKm || 500, 50, 2000))
+    radiusKm: Math.round(clamp(place.radiusKm || 1000, 50, 2000))
   }
 }
 
@@ -636,7 +636,14 @@ function watchPlaceFocus(place, currentZoom, minimumZoom, maximumZoom) {
 
 function stormWatchProximity(storm, place) {
   var normalized = normalizeWatchPlace(place)
-  if (!storm || !normalized) return { distanceKm: UNREACHABLE_DISTANCE_KM, source: "", forecastHour: 0 }
+  if (!storm || !normalized) return {
+    distanceKm: UNREACHABLE_DISTANCE_KM,
+    currentDistance: UNREACHABLE_DISTANCE_KM,
+    forecastDistance: UNREACHABLE_DISTANCE_KM,
+    source: "",
+    forecastHour: 0,
+    approaching: false
+  }
   var best = UNREACHABLE_DISTANCE_KM
   var source = ""
   var rings = Array.isArray(storm.cone) ? storm.cone : []
@@ -653,11 +660,12 @@ function stormWatchProximity(storm, place) {
     best = trackDistance
     source = "track"
   }
+  var currentDistance = UNREACHABLE_DISTANCE_KM
   if (validCoordinate(storm.latitude, storm.longitude)) {
-    var centreDistance = haversineDistanceKm(
+    currentDistance = haversineDistanceKm(
       normalized.latitude, normalized.longitude, storm.latitude, storm.longitude)
-    if (centreDistance < best) {
-      best = centreDistance
+    if (currentDistance < best) {
+      best = currentDistance
       source = "centre"
     }
   }
@@ -665,14 +673,25 @@ function stormWatchProximity(storm, place) {
   var forecastDistance = UNREACHABLE_DISTANCE_KM
   for (var i = 0; i < track.length; i++) {
     if (!watchCoordinate(track[i])) continue
+    var requestedHour = Math.max(0, Math.round(Number(track[i].forecastHour || 0)))
+    if (requestedHour === 0 && i === 0) continue
     var pointDistance = haversineDistanceKm(
       normalized.latitude, normalized.longitude, track[i].latitude, track[i].longitude)
     if (pointDistance < forecastDistance) {
       forecastDistance = pointDistance
-      forecastHour = Math.max(0, Math.round(Number(track[i].forecastHour || 0)))
+      forecastHour = requestedHour
     }
   }
-  return { distanceKm: best, source: source, forecastHour: forecastHour }
+  var approachMargin = currentDistance < UNREACHABLE_DISTANCE_KM
+    ? Math.max(75, currentDistance * 0.08) : UNREACHABLE_DISTANCE_KM
+  return {
+    distanceKm: best,
+    currentDistance: currentDistance,
+    forecastDistance: forecastDistance,
+    source: source,
+    forecastHour: forecastHour,
+    approaching: currentDistance - forecastDistance >= approachMargin
+  }
 }
 
 function outlookWatchProximity(outlook, place) {
@@ -699,6 +718,32 @@ function outlookWatchProximity(outlook, place) {
   return { distanceKm: best, source: source }
 }
 
+function watchAttentionRank(level) {
+  var normalized = String(level || "")
+  if (normalized === "urgent") return 3
+  if (normalized === "monitor") return 2
+  if (normalized === "heads-up") return 1
+  return 0
+}
+
+function watchSnapshotRank(item) {
+  if (!item) return 0
+  var requested = Number(item.attentionRank)
+  if (isFinite(requested)) return Math.max(0, Math.round(requested))
+  var ranked = watchAttentionRank(item.attentionLevel)
+  return ranked > 0 ? ranked : (item.meetsThreshold ? 1 : 0)
+}
+
+function stormWatchAttentionLevel(storm, place, proximity) {
+  var normalized = normalizeWatchPlace(place)
+  if (!storm || !normalized || !proximity || proximity.distanceKm > normalized.radiusKm) return ""
+  var closeApproach = Math.min(proximity.distanceKm, proximity.forecastDistance)
+  var localThreshold = Math.min(normalized.radiusKm, Math.max(250, normalized.radiusKm * 0.65))
+  if (proximity.currentDistance <= normalized.radiusKm
+      && proximity.approaching && closeApproach <= localThreshold) return "urgent"
+  return "monitor"
+}
+
 function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
   var active = Array.isArray(storms) ? storms : []
   var developing = Array.isArray(outlooks) ? outlooks : []
@@ -710,6 +755,7 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
     if (!place) continue
     for (var s = 0; s < active.length; s++) {
       var stormProximity = stormWatchProximity(active[s], place)
+      var stormAttention = stormWatchAttentionLevel(active[s], place, stormProximity)
       var stormKey = "place:" + place.id + "|storm:" + String(active[s].id || "")
       output[stormKey] = {
         scope: "place", kind: "storm", key: stormKey,
@@ -719,14 +765,21 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
         systemKey: "storm:" + String(active[s].id || ""),
         label: classificationLabel(active[s]),
         distanceKm: stormProximity.distanceKm,
+        currentDistance: stormProximity.currentDistance,
+        forecastDistance: stormProximity.forecastDistance,
         proximitySource: stormProximity.source,
         forecastHour: stormProximity.forecastHour,
-        meetsThreshold: stormProximity.distanceKm <= place.radiusKm
+        approaching: stormProximity.approaching,
+        attentionLevel: stormAttention,
+        attentionRank: watchAttentionRank(stormAttention),
+        meetsThreshold: watchAttentionRank(stormAttention) > 0
       }
     }
     for (var o = 0; o < developing.length; o++) {
       var outlookProximity = outlookWatchProximity(developing[o], place)
       var chance = Math.max(0, Math.round(Number(developing[o].sevenDayChance || 0)))
+      var outlookAttention = chance >= threshold && outlookProximity.distanceKm <= place.radiusKm
+        ? "heads-up" : ""
       var outlookKey = "place:" + place.id + "|outlook:" + String(developing[o].id || "")
       output[outlookKey] = {
         scope: "place", kind: "outlook", key: outlookKey,
@@ -738,7 +791,9 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
         chance: chance,
         distanceKm: outlookProximity.distanceKm,
         proximitySource: outlookProximity.source,
-        meetsThreshold: chance >= threshold && outlookProximity.distanceKm <= place.radiusKm
+        attentionLevel: outlookAttention,
+        attentionRank: watchAttentionRank(outlookAttention),
+        meetsThreshold: watchAttentionRank(outlookAttention) > 0
       }
     }
   }
@@ -752,7 +807,7 @@ function watchAlertEvents(previous, current) {
   for (var key in after) {
     var item = after[key]
     var old = before[key]
-    if (item.meetsThreshold && (!old || !old.meetsThreshold)) events.push(item)
+    if (watchSnapshotRank(item) > watchSnapshotRank(old)) events.push(item)
   }
   return events
 }
@@ -760,6 +815,13 @@ function watchAlertEvents(previous, current) {
 function watchDistanceLabel(distanceKm) {
   var distance = Math.max(0, Math.round(Number(distanceKm || 0)))
   return distance < 10 ? "at the watch point" : distance + " km away"
+}
+
+function watchForecastLeadLabel(hours) {
+  var value = Math.max(0, Math.round(Number(hours || 0)))
+  if (value === 0) return ""
+  if (value < 36) return " · ~" + value + "h"
+  return " · ~" + Math.max(2, Math.round(value / 24)) + "d"
 }
 
 function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
@@ -773,9 +835,9 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
     for (var key in snapshot) {
       var candidate = snapshot[key]
       if (candidate.placeId !== place.id || !candidate.meetsThreshold) continue
-      if (!selected
-          || (candidate.kind === "storm" && selected.kind !== "storm")
-          || (candidate.kind === selected.kind && candidate.distanceKm < selected.distanceKm))
+      if (!selected || candidate.attentionRank > selected.attentionRank
+          || (candidate.attentionRank === selected.attentionRank
+            && candidate.distanceKm < selected.distanceKm))
         selected = candidate
     }
     var coverage = watchPlaceCoverage(place)
@@ -784,25 +846,35 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
       state: coverage.supported ? "quiet" : "unsupported",
       status: coverage.supported ? "QUIET" : "LIMITED",
       detail: coverage.supported
-        ? place.radiusKm + " km watch area · NHC only"
+        ? place.radiusKm + " km forecast awareness · NHC only"
         : coverage.label,
       systemKey: "",
       event: null
     }
-    if (selected && selected.kind === "storm") {
+    if (selected && selected.attentionLevel === "urgent") {
+      summary.state = "urgent"
+      summary.status = "APPROACHING"
+      summary.detail = selected.name + " · closest forecast "
+        + watchDistanceLabel(selected.forecastDistance)
+        + watchForecastLeadLabel(selected.forecastHour)
+      summary.systemKey = selected.systemKey
+      summary.event = selected
+    } else if (selected && selected.kind === "storm") {
       summary.state = "monitor"
-      summary.status = "MONITOR"
+      summary.status = "MONITORING"
       summary.detail = selected.proximitySource === "cone" && selected.distanceKm < 10
-        ? selected.name + " · forecast cone overlaps watch area"
-        : selected.name + " · forecast " + watchDistanceLabel(selected.distanceKm)
+        ? selected.name + " · forecast cone reaches watch area"
+          + watchForecastLeadLabel(selected.forecastHour)
+        : selected.name + " · forecast may pass " + watchDistanceLabel(selected.distanceKm)
+          + watchForecastLeadLabel(selected.forecastHour)
       summary.systemKey = selected.systemKey
       summary.event = selected
     } else if (selected) {
       summary.state = "heads-up"
       summary.status = "HEADS-UP"
       summary.detail = selected.proximitySource === "area" && selected.distanceKm < 10
-        ? selected.name + " · " + selected.chance + "% formation area overlaps watch point"
-        : selected.name + " · " + selected.chance + "% formation · "
+        ? selected.name + " · " + selected.chance + "% formation area reaches watch area"
+        : selected.name + " · " + selected.chance + "% formation area may approach "
           + watchDistanceLabel(selected.distanceKm)
       summary.systemKey = selected.systemKey
       summary.event = selected

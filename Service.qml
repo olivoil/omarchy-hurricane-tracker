@@ -275,16 +275,23 @@ Item {
     var description = ""
     if (events.length === 1) {
       var event = events[0]
-      if (event.scope === "place" && event.kind === "storm") {
+      if (event.scope === "place" && event.kind === "storm"
+          && event.attentionLevel === "urgent") {
+        headline = event.name + " is approaching " + event.placeName
+        description = "The cyclone is within the " + Math.round(Number(event.radiusKm || 0))
+          + " km awareness area and the NHC forecast continues materially closer"
+          + forecastLeadLabel(event.forecastHour) + ". Awareness only, not a local warning."
+      } else if (event.scope === "place" && event.kind === "storm") {
         headline = event.name + " may pass near " + event.placeName
-        description = "The NHC forecast cone or center track has entered the "
-          + Math.round(Number(event.radiusKm || 0)) + " km watch area"
+        description = "The NHC forecast cone or center track may come within the "
+          + Math.round(Number(event.radiusKm || 0)) + " km awareness area"
           + forecastLeadLabel(event.forecastHour) + ". Awareness only, not a local warning."
       } else if (event.scope === "place") {
-        headline = "Formation heads-up near " + event.placeName
-        description = "An NHC outlook within the " + Math.round(Number(event.radiusKm || 0))
-          + " km watch area has reached " + Math.round(Number(event.chance || 0))
-          + "% formation chance within 7 days. No local track is available yet."
+        headline = "Formation heads-up for " + event.placeName
+        description = "An NHC 7-day formation area that may approach the "
+          + Math.round(Number(event.radiusKm || 0)) + " km awareness area has reached "
+          + Math.round(Number(event.chance || 0))
+          + "% formation chance. No local track is available yet."
       } else {
         var region = Model.regionName(event.basin)
         if (event.kind === "storm") {

@@ -67,6 +67,17 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn('text: "Places"', overlay)
         self.assertNotIn('text: "OMANADO"', overlay)
         self.assertIn('stormMap.focusWatchPlace(place)', overlay)
+        self.assertIn('visible: root.alertUpdateCount > 0', overlay)
+        self.assertIn('text: String(root.alertUpdateCount)', overlay)
+        self.assertIn('if (payload.alerts === true) sidebarMode = "alerts"', overlay)
+        self.assertIn('"WATCHED LOCATIONS"', overlay)
+
+    def test_overlay_has_readable_minimum_type_and_touch_tokens(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        self.assertIn("readonly property int typeMicro", overlay)
+        self.assertIn("readonly property int typeCaption", overlay)
+        self.assertIn("readonly property int minimumTouchTarget", overlay)
+        self.assertNotRegex(overlay, r"Math\.max\([678], Style\.font\.caption -")
 
     def test_plugin_id_is_injected_for_parallel_preview_installs(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")

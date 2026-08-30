@@ -422,8 +422,8 @@ Item {
     var maximumRank = zoom < 2.3 ? 2 : (zoom < 5 ? 4 : 6)
     context.textAlign = "center"
     context.textBaseline = "middle"
-    context.font = "600 " + Math.round(Math.min(12, 8 + Math.sqrt(zoom))) + "px '" + fontFamily + "'"
-    context.fillStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, zoom < 2 ? 0.44 : 0.58)
+    context.font = "600 " + Math.round(Math.min(13, 9 + Math.sqrt(zoom))) + "px '" + fontFamily + "'"
+    context.fillStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, zoom < 2 ? 0.54 : 0.68)
     for (var i = 0; i < rows.length; i++) {
       var properties = rows[i] && rows[i].properties
       if (!properties || Number(properties.labelRank || 9) > maximumRank) continue
@@ -470,7 +470,7 @@ Item {
     if (selected || hovered || zoom >= 2.2) {
       context.textAlign = "left"
       context.textBaseline = "middle"
-      context.font = "700 " + (selected ? 11 : 9) + "px '" + fontFamily + "'"
+      context.font = "700 " + (selected ? 12 : 10) + "px '" + fontFamily + "'"
       context.fillStyle = selected ? textColor : mutedTextColor
       context.fillText(String(place.name || "WATCH PLACE").toUpperCase(), point.x + radius + 7, point.y)
     }
@@ -510,7 +510,7 @@ Item {
     drawPath(context, rows, Qt.rgba(trackColor.r, trackColor.g, trackColor.b, 0.94), 2.4, false)
     context.textAlign = "center"
     context.textBaseline = "bottom"
-    context.font = "700 10px '" + fontFamily + "'"
+    context.font = "700 11px '" + fontFamily + "'"
     for (var i = 0; i < rows.length; i++) {
       var forecast = rows[i]
       if (Number(forecast.forecastHour || 0) === 0) continue
@@ -576,7 +576,7 @@ Item {
     if (selected || zoom >= 1.75) {
       context.textAlign = "left"
       context.textBaseline = "middle"
-      context.font = "700 " + (selected ? 12 : 10) + "px '" + fontFamily + "'"
+      context.font = "700 " + (selected ? 13 : 11) + "px '" + fontFamily + "'"
       context.fillStyle = textColor
       context.fillText(String(outlook.name || outlook.title || "OUTLOOK").toUpperCase(), point.x + radius + 8, point.y - 1)
     }
@@ -615,7 +615,7 @@ Item {
     context.stroke()
     context.textAlign = "left"
     context.textBaseline = "middle"
-    context.font = "700 " + (selected ? 12 : 10) + "px '" + fontFamily + "'"
+    context.font = "700 " + (selected ? 13 : 11) + "px '" + fontFamily + "'"
     context.fillStyle = textColor
     context.fillText(String(storm.name || "").toUpperCase(), point.x + radius + 8, point.y - 1)
   }
@@ -755,7 +755,7 @@ Item {
       text: "GLOBE · DRAG TO ROTATE"
       color: root.mutedTextColor
       font.family: root.fontFamily
-      font.pixelSize: 10
+      font.pixelSize: 11
       font.bold: true
       font.letterSpacing: 0.5
     }
@@ -784,7 +784,7 @@ Item {
       textFormat: Text.PlainText
       color: root.textColor
       font.family: root.fontFamily
-      font.pixelSize: 12
+      font.pixelSize: 13
       font.bold: true
     }
     Text {
@@ -796,7 +796,7 @@ Item {
       textFormat: Text.PlainText
       color: root.mutedTextColor
       font.family: root.fontFamily
-      font.pixelSize: 10
+      font.pixelSize: 11
     }
   }
 
