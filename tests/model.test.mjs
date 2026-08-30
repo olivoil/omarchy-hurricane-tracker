@@ -398,10 +398,32 @@ assert.equal(Object.keys(stabilizedSourceReplacement.current).length, 1)
 assert.equal(model.alertEvents(
   stabilizedSourceReplacement.before, stabilizedSourceReplacement.current
 ).length, 0)
+const dedicatedCentralSnapshot = model.alertSnapshot(
+  [], [dedicatedCentralReplacement], "All NHC basins", "Medium (40%)", true
+)
+const stabilizedHealthyEasternReplacement = model.stabilizedAlertSnapshots(
+  dedicatedCentralSnapshot, relabeledSourceSnapshot, ["cp"], []
+)
+assert.equal(Object.keys(stabilizedHealthyEasternReplacement.current).length, 1)
+assert.equal(model.alertEvents(
+  stabilizedHealthyEasternReplacement.before,
+  stabilizedHealthyEasternReplacement.current
+).length, 0)
 assert.equal(model.watchPlaceTouchesOutlookBasin(centralPacificSourcePlace, "ep"), true)
 const relabeledSourcePlaceSnapshot = model.watchAlertSnapshot(
   [], [relabeledEasternSourceOutlook], [centralPacificSourcePlace], "Medium (40%)"
 )
+const dedicatedCentralPlaceSnapshot = model.watchAlertSnapshot(
+  [], [dedicatedCentralReplacement], [centralPacificSourcePlace], "Medium (40%)"
+)
+const stabilizedHealthyEasternPlaceReplacement = model.stabilizedAlertSnapshots(
+  dedicatedCentralPlaceSnapshot, relabeledSourcePlaceSnapshot, ["cp"], []
+)
+assert.equal(Object.keys(stabilizedHealthyEasternPlaceReplacement.current).length, 1)
+assert.equal(model.watchAlertEvents(
+  stabilizedHealthyEasternPlaceReplacement.before,
+  stabilizedHealthyEasternPlaceReplacement.current
+).length, 0)
 const preservedEasternSourcePlace = model.stabilizedAlertSnapshots(
   relabeledSourcePlaceSnapshot, {}, ["ep"], []
 )
