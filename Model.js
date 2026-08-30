@@ -851,6 +851,7 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
         basin: String(developing[o].basin || ""),
         systemKey: "outlook:" + String(developing[o].id || ""),
         outlookIdentity: outlookIdentityLabel(developing[o]),
+        outlookStableIdentifier: outlookStableIdentifier(developing[o]),
         outlookIdentityStable: outlookIdentityIsStable(developing[o]),
         latitude: Number(developing[o].latitude),
         longitude: Number(developing[o].longitude),
@@ -873,11 +874,21 @@ function outlookIdentityLabel(system) {
   return source.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }
 
-function outlookIdentityIsStable(system) {
-  var classification = String(system && system.classificationLabel || "").toLowerCase()
+function outlookStableIdentifier(system) {
+  var explicit = String(system && system.outlookStableIdentifier || "")
+    .toLowerCase().replace(/[^a-z0-9:]+/g, " ").trim().slice(0, 96)
+  if (explicit !== "") return explicit
   var identity = outlookIdentityLabel(system)
-  return (classification !== "" && classification !== "developing system")
-    || /(^| )(al|ep|cp)[0-9]{2}($| )/.test(identity)
+  var invest = identity.match(/(^| )((al|ep|cp)[0-9]{2})($| )/)
+  if (invest) return invest[2]
+  var classification = String(system && (
+    system.classificationLabel || system.label) || "").toLowerCase()
+  return classification !== "" && classification !== "developing system"
+    && identity !== "" ? "named:" + identity : ""
+}
+
+function outlookIdentityIsStable(system) {
+  return outlookStableIdentifier(system) !== ""
 }
 
 function outlookSnapshotIdentityMatches(first, second) {
@@ -885,13 +896,15 @@ function outlookSnapshotIdentityMatches(first, second) {
     return false
   var firstIdentity = outlookIdentityLabel(first)
   var secondIdentity = outlookIdentityLabel(second)
+  var firstStableIdentifier = outlookStableIdentifier(first)
+  var secondStableIdentifier = outlookStableIdentifier(second)
+  if (firstStableIdentifier !== "" || secondStableIdentifier !== "")
+    return firstStableIdentifier !== "" && firstStableIdentifier === secondStableIdentifier
   var coordinatesAvailable = validCoordinate(first.latitude, first.longitude)
     && validCoordinate(second.latitude, second.longitude)
   var distance = coordinatesAvailable ? haversineDistanceKm(
     first.latitude, first.longitude, second.latitude, second.longitude) : Infinity
   if (firstIdentity === "" || firstIdentity !== secondIdentity) return false
-  if (first.outlookIdentityStable === true || second.outlookIdentityStable === true)
-    return true
   return !coordinatesAvailable || distance <= 1800
 }
 
@@ -1164,6 +1177,7 @@ function alertSnapshot(storms, outlooks, regionValue, thresholdValue, includeNam
       kind: "outlook", key: outlookKey, name: String(developing[o].name || developing[o].title || "Developing system"),
       basin: String(developing[o].basin || ""), label: String(developing[o].classificationLabel || "Developing system"),
       outlookIdentity: outlookIdentityLabel(developing[o]),
+      outlookStableIdentifier: outlookStableIdentifier(developing[o]),
       outlookIdentityStable: outlookIdentityIsStable(developing[o]),
       latitude: Number(developing[o].latitude), longitude: Number(developing[o].longitude),
       chance: chance, meetsThreshold: chance >= threshold

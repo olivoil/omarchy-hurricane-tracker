@@ -138,6 +138,30 @@ assert.equal(model.alertEvents({}, quietSnapshot).length, 0)
 const developing = { ...outlook, sevenDayChance: 40 }
 const developingSnapshot = model.alertSnapshot([], [developing], "Atlantic", "Medium (40%)", true)
 assert.equal(model.alertEvents(quietSnapshot, developingSnapshot)[0].name, "Dolly")
+const invest = {
+  ...developing,
+  name: "Central Tropical Atlantic (AL90)",
+  title: "Central Tropical Atlantic (AL90)",
+  classificationLabel: "Developing system"
+}
+const renamedInvest = {
+  ...invest,
+  name: "Western Tropical Atlantic (AL90)",
+  title: "Western Tropical Atlantic (AL90)"
+}
+assert.equal(model.outlookStableIdentifier(invest), "al90")
+assert.equal(model.alertEvents(
+  model.alertSnapshot([], [invest], "Atlantic", "Medium (40%)", true),
+  model.alertSnapshot([], [renamedInvest], "Atlantic", "Medium (40%)", true)
+).length, 0)
+assert.equal(model.alertEvents(
+  model.alertSnapshot([], [invest], "Atlantic", "Medium (40%)", true),
+  model.alertSnapshot([], [{
+    ...renamedInvest,
+    name: "Western Tropical Atlantic (AL91)",
+    title: "Western Tropical Atlantic (AL91)"
+  }], "Atlantic", "Medium (40%)", true)
+).length, 1)
 const renumberedDeveloping = { ...developing, id: "al-outlook-2", longitude: -52 }
 const renumberedDevelopingSnapshot = model.alertSnapshot(
   [], [renumberedDeveloping], "Atlantic", "Medium (40%)", true
@@ -306,6 +330,10 @@ const renumberedFormationSnapshot = model.watchAlertSnapshot(
 )
 assert.equal(model.watchAlertEvents(
   formationSnapshot, renumberedFormationSnapshot
+).length, 0)
+assert.equal(model.watchAlertEvents(
+  model.watchAlertSnapshot([], [invest], [family], "Medium (40%)"),
+  model.watchAlertSnapshot([], [renamedInvest], [family], "Medium (40%)")
 ).length, 0)
 const reusedPlaceOrdinal = {
   ...developing,
