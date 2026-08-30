@@ -20,12 +20,17 @@ BarWidget {
     ? Model.watchPlaceSummaries(tracker.storms, tracker.outlooks,
       tracker.watchPlaces, tracker.formationThreshold, tracker.useImperial === true) : []
   readonly property int personalAlertCount: Model.watchAttentionCount(watchPlaceSummaries)
+  readonly property int unsupportedPlaceCount: Model.watchUnsupportedCount(watchPlaceSummaries)
+  readonly property bool limitedCoverage: hasWatchPlaces && unsupportedPlaceCount > 0
+  readonly property bool allWatchPlacesUnsupported: limitedCoverage
+    && unsupportedPlaceCount === watchPlaceSummaries.length
   readonly property string personalAttentionState:
     Model.watchStrongestAttentionState(watchPlaceSummaries)
   readonly property int indicatorCount: hasWatchPlaces ? personalAlertCount : trackingCount
   readonly property color personalAlertColor: personalAttentionState === "urgent" ? Color.urgent
     : (personalAttentionState === "monitor" ? "#e9be62" : Color.accent)
-  readonly property color indicatorColor: hasWatchPlaces ? personalAlertColor
+  readonly property color indicatorColor: hasWatchPlaces
+    ? (limitedCoverage && personalAlertCount === 0 ? "#e9be62" : personalAlertColor)
     : (strongestStorm ? Model.severityColor(strongestStorm)
       : (bar ? bar.barForeground : Color.foreground))
 
@@ -47,10 +52,24 @@ BarWidget {
     if (!tracker || (!tracker.hasLoaded && tracker.loading)) return "Checking NHC data"
     var summary = ""
     if (hasWatchPlaces) {
-      summary = personalAlertCount > 0
-        ? personalAlertCount + (personalAlertCount === 1
+      if (personalAlertCount > 0) {
+        summary = personalAlertCount + (personalAlertCount === 1
           ? " location needs attention" : " locations need attention")
-        : "All locations quiet"
+        if (limitedCoverage) summary += " · " + unsupportedPlaceCount
+          + (unsupportedPlaceCount === 1
+            ? " location outside NHC coverage" : " locations outside NHC coverage")
+      } else if (allWatchPlacesUnsupported) {
+        summary = watchPlaceSummaries.length === 1
+          ? "Saved location outside NHC coverage"
+          : "Saved locations outside NHC coverage"
+      } else if (limitedCoverage) {
+        summary = unsupportedPlaceCount
+          + (unsupportedPlaceCount === 1
+            ? " location outside NHC coverage" : " locations outside NHC coverage")
+          + " · Others quiet"
+      } else {
+        summary = "All locations quiet"
+      }
       if (trackingCount > 0) summary += " · " + trackingCount
         + (trackingCount === 1 ? " system tracked" : " systems tracked")
     } else {
@@ -72,7 +91,7 @@ BarWidget {
     text: " "
     labelVisible: false
     fixedWidth: Math.max(Style.space(24), barContent.implicitWidth + Style.space(10))
-    active: root.indicatorCount > 0
+    active: root.indicatorCount > 0 || root.limitedCoverage
     activeColor: root.indicatorColor
     tooltipText: root.tooltip()
 
@@ -110,7 +129,8 @@ BarWidget {
         root.refresh()
       } else if (mouseButton === Qt.RightButton) {
         root.openSource()
-      } else if (root.hasWatchPlaces && root.personalAlertCount > 0) {
+      } else if (root.hasWatchPlaces
+          && (root.personalAlertCount > 0 || root.limitedCoverage)) {
         root.bar.run("omarchy-shell shell summon " + root.pluginId + " '{\"alerts\":true}'")
       } else {
         root.bar.run("omarchy-shell shell toggle " + root.pluginId)

@@ -753,6 +753,14 @@ function watchAttentionCount(summaries) {
   return count
 }
 
+function watchUnsupportedCount(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  var count = 0
+  for (var i = 0; i < rows.length; i++)
+    if (String(rows[i] && rows[i].state || "") === "unsupported") count++
+  return count
+}
+
 function watchStrongestAttentionState(summaries) {
   var rows = Array.isArray(summaries) ? summaries : []
   var strongest = ""

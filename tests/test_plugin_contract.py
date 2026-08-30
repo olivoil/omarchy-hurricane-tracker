@@ -235,6 +235,16 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("All locations quiet", bar_widget)
         self.assertNotIn("left open", bar_widget)
 
+    def test_bar_surfaces_unsupported_watch_coverage(self):
+        bar_widget = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
+
+        self.assertIn("Model.watchUnsupportedCount", bar_widget)
+        self.assertIn("readonly property bool limitedCoverage", bar_widget)
+        self.assertIn("root.indicatorCount > 0 || root.limitedCoverage", bar_widget)
+        self.assertIn("Saved locations outside NHC coverage", bar_widget)
+        self.assertIn("location outside NHC coverage", bar_widget)
+        self.assertIn("root.personalAlertCount > 0 || root.limitedCoverage", bar_widget)
+
 
 if __name__ == "__main__":
     unittest.main()

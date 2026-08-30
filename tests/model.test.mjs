@@ -412,6 +412,10 @@ assert.equal(model.watchAttentionCount([
   { state: "quiet" }, { state: "heads-up" }, { state: "monitor" }, { state: "unsupported" }
 ]), 2)
 assert.equal(model.watchAttentionCount(null), 0)
+assert.equal(model.watchUnsupportedCount([
+  { state: "quiet" }, { state: "unsupported" }, { state: "unsupported" }
+]), 2)
+assert.equal(model.watchUnsupportedCount(null), 0)
 assert.equal(model.watchStrongestAttentionState([
   { state: "quiet" }, { state: "heads-up" }, { state: "monitor" }, { state: "urgent" }
 ]), "urgent")
