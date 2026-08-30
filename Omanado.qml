@@ -3108,6 +3108,7 @@ Item {
 
             Text {
               visible: root.tracker && !root.tracker.watchPlacesLoaded
+                && root.tracker.watchPlacesError === ""
               anchors.horizontalCenter: parent.horizontalCenter
               anchors.verticalCenter: parent.verticalCenter
               anchors.verticalCenterOffset: alertsSummary.height / 2

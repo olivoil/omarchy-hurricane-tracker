@@ -794,7 +794,7 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
   var output = {}
   for (var p = 0; p < watches.length; p++) {
     var place = normalizeWatchPlace(watches[p])
-    if (!place) continue
+    if (!place || !watchPlaceCoverage(place).supported) continue
     for (var s = 0; s < active.length; s++) {
       var stormProximity = stormWatchProximity(active[s], place)
       var stormAttention = stormWatchAttentionLevel(active[s], place, stormProximity)
@@ -854,6 +854,29 @@ function watchAlertEvents(previous, current) {
   return events
 }
 
+function alertEventSystemKey(event) {
+  if (!event) return ""
+  return String(event.scope === "place" ? event.systemKey || "" : event.key || "")
+}
+
+function coalesceAlertEvents(events) {
+  var rows = Array.isArray(events) ? events : []
+  var placeSystems = ({})
+  var output = []
+  for (var i = 0; i < rows.length; i++) {
+    var placeEvent = rows[i]
+    var placeKey = alertEventSystemKey(placeEvent)
+    if (placeEvent && placeEvent.scope === "place" && placeKey) placeSystems[placeKey] = true
+  }
+  for (var r = 0; r < rows.length; r++) {
+    var event = rows[r]
+    var systemKey = alertEventSystemKey(event)
+    if (event && event.scope !== "place" && systemKey && placeSystems[systemKey]) continue
+    output.push(event)
+  }
+  return output
+}
+
 function watchDistanceLabel(distanceKm, useImperial) {
   var distance = Math.max(0, Math.round(Number(distanceKm || 0)))
   return distance < 10 ? "at the watch point"
@@ -865,6 +888,12 @@ function watchForecastLeadLabel(hours) {
   if (value === 0) return ""
   if (value < 36) return " · ~" + value + "h"
   return " · ~" + Math.max(2, Math.round(value / 24)) + "d"
+}
+
+function watchForecastLeadHours(event) {
+  if (!event) return 0
+  var hours = Math.max(0, Math.round(Number(event.forecastHour || 0)))
+  return event.attentionLevel === "urgent" || event.proximitySource === "track" ? hours : 0
 }
 
 function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperial) {
@@ -900,7 +929,7 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
       summary.status = "APPROACHING"
       summary.detail = selected.name + " · closest forecast "
         + watchDistanceLabel(selected.forecastDistance, useImperial)
-        + watchForecastLeadLabel(selected.forecastHour)
+        + watchForecastLeadLabel(watchForecastLeadHours(selected))
       summary.systemKey = selected.systemKey
       summary.event = selected
     } else if (selected && selected.kind === "storm") {
@@ -908,10 +937,10 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperi
       summary.status = "MONITORING"
       summary.detail = selected.proximitySource === "cone" && selected.distanceKm < 10
         ? selected.name + " · forecast cone reaches watch area"
-          + watchForecastLeadLabel(selected.forecastHour)
+          + watchForecastLeadLabel(watchForecastLeadHours(selected))
         : selected.name + " · forecast may pass "
           + watchDistanceLabel(selected.distanceKm, useImperial)
-          + watchForecastLeadLabel(selected.forecastHour)
+          + watchForecastLeadLabel(watchForecastLeadHours(selected))
       summary.systemKey = selected.systemKey
       summary.event = selected
     } else if (selected) {

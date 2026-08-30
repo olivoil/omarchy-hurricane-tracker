@@ -5,7 +5,9 @@ import importlib.util
 import http.server
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -518,6 +520,27 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(saved["places"][0]["name"], "Home base")
             self.assertEqual(saved["places"][0]["radiusKm"], 2000)
             self.assertEqual(omanado.read_watch_config(path), saved)
+
+    def test_corrupt_watch_file_is_reported_without_being_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "omanado" / "watch-places.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("{not valid json", encoding="utf-8")
+
+            environment = os.environ.copy()
+            environment["XDG_CONFIG_HOME"] = directory
+            result = subprocess.run(
+                [str(BACKEND), "watch-load"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("watch-place settings", result.stderr)
+            self.assertEqual(path.read_text(encoding="utf-8"), "{not valid json")
 
     def test_watch_place_radius_defaults_to_forecast_awareness_range(self):
         place = omanado.normalized_watch_place(

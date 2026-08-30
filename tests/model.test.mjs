@@ -151,6 +151,30 @@ assert.ok(Math.abs(model.haversineDistanceKm(
 assert.equal(model.watchPlaceCoverage(home).supported, true)
 assert.equal(model.watchPlaceCoverage({ ...home, longitude: 139.69 }).supported, false)
 
+const unsupportedPlace = {
+  id: "unsupported",
+  name: "Outside coverage",
+  latitude: -1,
+  longitude: -73,
+  radiusKm: 2000
+}
+const unsupportedStorm = {
+  ...storm,
+  id: "al-unsupported",
+  latitude: -1,
+  longitude: -73,
+  track: [{ latitude: -1, longitude: -73 }],
+  cone: []
+}
+const unsupportedSnapshot = model.watchAlertSnapshot(
+  [unsupportedStorm], [], [unsupportedPlace], "Medium (40%)"
+)
+assert.equal(Object.keys(unsupportedSnapshot).length, 0)
+assert.equal(model.watchAlertEvents({}, unsupportedSnapshot).length, 0)
+assert.equal(model.watchPlaceSummaries(
+  [unsupportedStorm], [], [unsupportedPlace], "Medium (40%)"
+)[0].state, "unsupported")
+
 const stormProximity = model.stormWatchProximity(storm, home)
 assert.equal(stormProximity.distanceKm, 0)
 assert.equal(stormProximity.source, "cone")
@@ -172,6 +196,18 @@ assert.equal(formationSnapshot["place:family|outlook:al-outlook-1"].meetsThresho
 assert.equal(model.watchPlaceSummaries([], [developing], [family], "Medium (40%)")[0].state, "heads-up")
 const lowFormationSnapshot = model.watchAlertSnapshot([], [outlook], [family], "Medium (40%)")
 assert.equal(model.watchAlertEvents(lowFormationSnapshot, formationSnapshot).length, 1)
+const basinFormationEvent = model.alertEvents(quietSnapshot, developingSnapshot)[0]
+const placeFormationEvent = model.watchAlertEvents(lowFormationSnapshot, formationSnapshot)[0]
+const coalescedFormationEvents = model.coalesceAlertEvents([
+  basinFormationEvent, placeFormationEvent
+])
+assert.equal(coalescedFormationEvents.length, 1)
+assert.equal(coalescedFormationEvents[0].scope, "place")
+assert.equal(model.coalesceAlertEvents([
+  basinFormationEvent,
+  placeFormationEvent,
+  { ...placeFormationEvent, placeId: "family-two", placeName: "Family two" }
+]).length, 2)
 
 const cancun = {
   id: "cancun",
@@ -217,6 +253,32 @@ const caribbeanMonitor = {
 const monitorSnapshot = model.watchAlertSnapshot([caribbeanMonitor], [], [cancun], "Medium (40%)")
 assert.equal(monitorSnapshot["place:cancun|storm:al022026"].attentionLevel, "monitor")
 assert.equal(model.watchPlaceSummaries([caribbeanMonitor], [], [cancun], "Medium (40%)")[0].state, "monitor")
+
+const coneOnlyStorm = {
+  ...caribbeanMonitor,
+  id: "al-cone-only",
+  name: "Cone only",
+  latitude: 17,
+  longitude: -60,
+  track: [
+    { forecastHour: 0, latitude: 17, longitude: -60 },
+    { forecastHour: 120, latitude: 29, longitude: -78 }
+  ],
+  cone: [[[-88, 19], [-84, 19], [-84, 23], [-88, 23], [-88, 19]]]
+}
+const coneOnlySnapshot = model.watchAlertSnapshot(
+  [coneOnlyStorm], [], [cancun], "Medium (40%)"
+)
+assert.equal(coneOnlySnapshot["place:cancun|storm:al-cone-only"].proximitySource, "cone")
+assert.equal(model.watchForecastLeadHours(
+  coneOnlySnapshot["place:cancun|storm:al-cone-only"]
+), 0)
+assert.equal(
+  model.watchPlaceSummaries(
+    [coneOnlyStorm], [], [cancun], "Medium (40%)"
+  )[0].detail,
+  "Cone only · forecast cone reaches watch area"
+)
 
 const yucatanApproach = {
   ...caribbeanMonitor,

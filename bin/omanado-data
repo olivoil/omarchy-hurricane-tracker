@@ -94,7 +94,7 @@ BASIN_LABELS = {
 
 
 class DataError(RuntimeError):
-    """A bounded, user-safe failure while loading remote cyclone data."""
+    """A bounded, user-safe failure while loading external or saved data."""
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1370,12 +1370,28 @@ def normalize_watch_config(value: Any) -> dict[str, Any]:
 
 def read_watch_config(path: Path | None = None) -> dict[str, Any]:
     target = path or watch_config_path()
-    try:
-        if not target.is_file() or target.stat().st_size > MAX_WATCH_CONFIG_BYTES:
-            return normalize_watch_config({})
-        parsed = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    if not target.exists():
         return normalize_watch_config({})
+    try:
+        if not target.is_file():
+            raise DataError("watch-place settings are not a regular file")
+        if target.stat().st_size > MAX_WATCH_CONFIG_BYTES:
+            raise DataError("watch-place settings exceeded the size limit")
+        parsed = json.loads(target.read_text(encoding="utf-8"))
+    except DataError:
+        raise
+    except OSError as error:
+        raise DataError("watch-place settings could not be read") from error
+    except UnicodeDecodeError as error:
+        raise DataError("watch-place settings were not valid UTF-8") from error
+    except json.JSONDecodeError as error:
+        raise DataError("watch-place settings were not valid JSON") from error
+    if (
+        not isinstance(parsed, dict)
+        or parsed.get("schemaVersion") != 1
+        or not isinstance(parsed.get("places"), list)
+    ):
+        raise DataError("watch-place settings had an unsupported structure")
     return normalize_watch_config(parsed)
 
 
@@ -1476,8 +1492,12 @@ def main(argv: Iterable[str] | None = None) -> int:
         return 0
 
     if args.command == "watch-load":
-        emit(read_watch_config())
-        return 0
+        try:
+            emit(read_watch_config())
+            return 0
+        except DataError as error:
+            print(f"omanado-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
 
     if args.command == "watch-save":
         try:

@@ -167,6 +167,20 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn('geocoding-api.open-meteo.com', overlay)
         self.assertNotIn('geocoding-api.open-meteo.com', service)
 
+    def test_watch_load_failure_preserves_data_and_keeps_edits_locked(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        failure_handler = service.split("if (!accepted) {", 1)[1].split(
+            "root.watchProcessOutput = \"\"", 1
+        )[0]
+
+        self.assertNotIn("root.watchPlaces = []", failure_handler)
+        self.assertIn("root.watchPlacesLoaded = false", failure_handler)
+        self.assertIn("The file was left unchanged", failure_handler)
+
+    def test_combined_alerts_are_coalesced_before_notification(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        self.assertIn("events = Model.coalesceAlertEvents(events)", service)
+
     def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         self.assertIn('property bool draftPlaceNameManuallyEdited: false', overlay)

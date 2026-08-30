@@ -482,6 +482,7 @@ Item {
       placeAlertsArmed = false
       appliedPlaceAlertConfig = placeAlertConfigKey
     }
+    events = Model.coalesceAlertEvents(events)
     if (events.length > 0) notifyEvents(events)
   }
 
@@ -503,12 +504,14 @@ Item {
         description = "The cyclone is within the "
           + Model.formatDistanceKm(event.radiusKm, useImperial, 5)
           + " awareness area and the NHC forecast continues materially closer"
-          + forecastLeadLabel(event.forecastHour) + ". Awareness only, not a local warning."
+          + forecastLeadLabel(Model.watchForecastLeadHours(event))
+          + ". Awareness only, not a local warning."
       } else if (event.scope === "place" && event.kind === "storm") {
         headline = event.name + " may pass near " + event.placeName
         description = "The NHC forecast cone or center track may come within the "
           + Model.formatDistanceKm(event.radiusKm, useImperial, 5) + " awareness area"
-          + forecastLeadLabel(event.forecastHour) + ". Awareness only, not a local warning."
+          + forecastLeadLabel(Model.watchForecastLeadHours(event))
+          + ". Awareness only, not a local warning."
       } else if (event.scope === "place") {
         headline = "Formation heads-up for " + event.placeName
         description = "An NHC 7-day formation area that may approach the "
@@ -620,13 +623,10 @@ Item {
       var shouldAssign = root.watchProcessOperation === "load" || root.pendingWatchPayload === ""
       var accepted = exitCode === 0 && root.applyWatchConfig(root.watchProcessOutput, shouldAssign)
       if (!accepted) {
-        if (root.watchProcessOperation === "load") {
-          root.watchPlaces = []
-          root.watchPlacesLoaded = true
-        }
+        if (root.watchProcessOperation === "load") root.watchPlacesLoaded = false
         root.watchPlacesError = root.watchProcessOperation === "save"
           ? "Watch places could not be saved. They remain active for this session."
-          : "Saved watch places could not be loaded."
+          : "Saved watch places could not be loaded. The file was left unchanged."
       }
       root.watchProcessOutput = ""
       root.watchProcessOperation = ""
