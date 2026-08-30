@@ -483,6 +483,26 @@ class BackendTests(unittest.TestCase):
             "track unavailable", "cone unavailable"
         })
 
+    def test_empty_forecast_products_mark_geometry_incomplete(self):
+        def fetcher(url: str, maximum: int) -> bytes:
+            if url == omanado.CURRENT_STORMS_URL:
+                return fixture("current-storms.json")
+            if url.endswith(("ADA_TRACK.kmz", "ADA_CONE.kmz")):
+                return kmz(fixture("empty-outlook.kml"))
+            if url.endswith("ada_best_track.kmz"):
+                return kmz(fixture("best-track.kml"))
+            if url.endswith("MIATCDAT1.shtml"):
+                return fixture("discussion.html")
+            if url in omanado.OUTLOOK_URLS.values():
+                return kmz(fixture("empty-outlook.kml"))
+            raise AssertionError(f"unexpected URL {url}")
+
+        payload = omanado.build_live_payload(fetcher)
+
+        self.assertEqual(set(payload["storms"][0]["dataWarnings"]), {
+            "track unavailable", "cone unavailable"
+        })
+
     def test_network_failure_returns_a_marked_stale_cache(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "storms.json"

@@ -1228,6 +1228,8 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
                     storms[index]["discussionTitle"] = parsed["title"]
                     storms[index]["discussionExcerpt"] = parsed["excerpt"]
                     storms[index]["discussionForecaster"] = parsed["forecaster"]
+                elif layer in ("track", "cone") and not parsed:
+                    storms[index]["dataWarnings"].append(f"{layer} unavailable")
                 else:
                     storms[index][layer] = parsed
             except Exception:
