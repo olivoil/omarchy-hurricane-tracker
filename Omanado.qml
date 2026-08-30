@@ -80,6 +80,12 @@ Item {
     : (selectedPlaceSummary ? String(selectedPlaceSummary.systemKey || "") : "")
   readonly property int alertDestinationCount: watchPlaces.length
   readonly property int alertUpdateCount: Model.watchAttentionCount(watchPlaceSummaries)
+  readonly property int alertUnsupportedDestinationCount:
+    Model.watchUnsupportedCount(watchPlaceSummaries)
+  readonly property int alertDataLimitedDestinationCount:
+    Model.watchDataLimitedCount(watchPlaceSummaries)
+  readonly property int alertLimitedDestinationCount: Math.min(alertDestinationCount,
+    alertUnsupportedDestinationCount + alertDataLimitedDestinationCount)
   readonly property string alertAttentionState:
     Model.watchStrongestAttentionState(watchPlaceSummaries)
   readonly property int dataFeedCount: 1
@@ -152,6 +158,8 @@ Item {
   readonly property int minimumTouchTarget: Style.space(40)
   readonly property color alertAttentionColor: alertAttentionState === "urgent" ? root.urgent
     : (alertAttentionState === "monitor" ? "#e9be62" : root.accent)
+  readonly property color alertStatusColor: alertUpdateCount > 0 ? alertAttentionColor
+    : (alertLimitedDestinationCount > 0 ? "#e9be62" : root.accent)
 
   readonly property int cardWidth: Math.min(Style.space(1660), panel.width - Style.gapsOut * 2)
   readonly property int cardHeight: Math.min(Style.space(980), panel.height - Style.gapsOut * 2)
@@ -891,7 +899,12 @@ Item {
           bordered: true
           selected: root.sidebarMode === "alerts"
           tooltipText: root.alertUpdateCount === 0
-            ? "Manage alerts (A). No watched locations need attention"
+            ? (root.alertLimitedDestinationCount > 0
+              ? "Manage alerts (A). " + String(root.alertLimitedDestinationCount)
+                + (root.alertLimitedDestinationCount === 1
+                  ? " watched location has limited coverage"
+                  : " watched locations have limited coverage")
+              : "Manage alerts (A). No watched locations need attention")
             : (root.alertUpdateCount === 1
               ? "1 watched location needs attention"
               : String(root.alertUpdateCount) + " watched locations need attention")
@@ -909,7 +922,7 @@ Item {
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: "◇"
-              color: root.alertUpdateCount > 0 ? root.alertAttentionColor : root.accent
+              color: root.alertStatusColor
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.body
               font.bold: true
@@ -2780,8 +2793,13 @@ Item {
                   : (root.alertUpdateCount > 0
                     ? String(root.alertUpdateCount) + (root.alertUpdateCount === 1
                       ? " LOCATION NEEDS ATTENTION" : " LOCATIONS NEED ATTENTION")
-                    : "ALL LOCATIONS QUIET")
-                color: root.alertUpdateCount > 0 ? root.alertAttentionColor : root.accent
+                    : (root.alertLimitedDestinationCount > 0
+                      ? String(root.alertLimitedDestinationCount)
+                        + (root.alertLimitedDestinationCount === 1
+                          ? " LOCATION HAS LIMITED COVERAGE"
+                          : " LOCATIONS HAVE LIMITED COVERAGE")
+                      : "ALL LOCATIONS QUIET"))
+                color: root.alertStatusColor
                 font.family: Style.font.menuFamily
                 font.pixelSize: root.typeCaption
                 font.bold: true
@@ -2797,7 +2815,9 @@ Item {
                 anchors.topMargin: Style.space(6)
                 text: root.alertDestinationCount === 0
                   ? "Save a location for calm heads-ups from official formation areas and forecast paths. Alert perimeters appear only while editing."
-                  : "Official formation areas and forecast paths are monitored for each location. Alert perimeters appear only while editing."
+                  : (root.alertUpdateCount === 0 && root.alertLimitedDestinationCount > 0
+                    ? "Some official source or forecast data is unavailable. Review each location below for coverage."
+                    : "Official formation areas and forecast paths are monitored for each location. Alert perimeters appear only while editing.")
                 textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
                 color: root.dim

@@ -137,12 +137,9 @@ BarWidget {
         root.refresh()
       } else if (mouseButton === Qt.RightButton) {
         root.openSource()
-      } else if (root.hasWatchPlaces
-          && (root.personalAlertCount > 0 || root.limitedCoverage
-            || root.partialWatchData)) {
-        root.bar.run("omarchy-shell shell summon " + root.pluginId + " '{\"alerts\":true}'")
       } else {
-        root.bar.run("omarchy-shell shell toggle " + root.pluginId)
+        root.bar.run("omarchy-shell shell toggle " + root.pluginId
+          + " '{\"activity\":true}'")
       }
     }
   }

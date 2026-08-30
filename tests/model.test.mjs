@@ -138,6 +138,36 @@ assert.equal(model.alertEvents({}, quietSnapshot).length, 0)
 const developing = { ...outlook, sevenDayChance: 40 }
 const developingSnapshot = model.alertSnapshot([], [developing], "Atlantic", "Medium (40%)", true)
 assert.equal(model.alertEvents(quietSnapshot, developingSnapshot)[0].name, "Dolly")
+const renumberedDeveloping = { ...developing, id: "al-outlook-2", longitude: -52 }
+const renumberedDevelopingSnapshot = model.alertSnapshot(
+  [], [renumberedDeveloping], "Atlantic", "Medium (40%)", true
+)
+assert.equal(model.alertEvents(developingSnapshot, renumberedDevelopingSnapshot).length, 0)
+const renumberedRisingSnapshot = model.alertSnapshot(
+  [], [{ ...outlook, id: "al-outlook-2", longitude: -52, sevenDayChance: 40 }],
+  "Atlantic", "Medium (40%)", true
+)
+assert.equal(model.alertEvents(quietSnapshot, renumberedRisingSnapshot).length, 1)
+const reusedOutlookOrdinal = {
+  ...developing,
+  name: "New eastern Atlantic wave",
+  title: "New eastern Atlantic wave",
+  classificationLabel: "Developing system",
+  latitude: 12,
+  longitude: -30
+}
+assert.equal(model.alertEvents(
+  developingSnapshot,
+  model.alertSnapshot([], [reusedOutlookOrdinal], "Atlantic", "Medium (40%)", true)
+).length, 1)
+assert.equal(model.alertEvents(
+  developingSnapshot,
+  model.alertSnapshot([], [{
+    ...reusedOutlookOrdinal,
+    latitude: developing.latitude,
+    longitude: developing.longitude
+  }], "Atlantic", "Medium (40%)", true)
+).length, 1)
 const partialGlobalSnapshot = model.alertSnapshot(
   [storm], [], "Atlantic", "Medium (40%)", true
 )
@@ -262,6 +292,25 @@ const family = {
 const formationSnapshot = model.watchAlertSnapshot([], [developing], [family], "Medium (40%)")
 assert.equal(formationSnapshot["place:family|outlook:al-outlook-1"].meetsThreshold, true)
 assert.equal(model.watchPlaceSummaries([], [developing], [family], "Medium (40%)")[0].state, "heads-up")
+const renumberedFormationSnapshot = model.watchAlertSnapshot(
+  [], [renumberedDeveloping], [family], "Medium (40%)"
+)
+assert.equal(model.watchAlertEvents(
+  formationSnapshot, renumberedFormationSnapshot
+).length, 0)
+const reusedPlaceOrdinal = {
+  ...developing,
+  name: "New Caribbean disturbance",
+  title: "New Caribbean disturbance",
+  classificationLabel: "Developing system",
+  latitude: 23,
+  longitude: -71,
+  area: [[[-72, 22], [-70, 22], [-70, 24], [-72, 24], [-72, 22]]]
+}
+assert.equal(model.watchAlertEvents(
+  formationSnapshot,
+  model.watchAlertSnapshot([], [reusedPlaceOrdinal], [family], "Medium (40%)")
+).length, 1)
 const lowFormationSnapshot = model.watchAlertSnapshot([], [outlook], [family], "Medium (40%)")
 assert.equal(model.watchAlertEvents(lowFormationSnapshot, formationSnapshot).length, 1)
 const basinFormationEvent = model.alertEvents(quietSnapshot, developingSnapshot)[0]

@@ -850,6 +850,10 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
         name: String(developing[o].name || developing[o].title || "Developing system"),
         basin: String(developing[o].basin || ""),
         systemKey: "outlook:" + String(developing[o].id || ""),
+        outlookIdentity: outlookIdentityLabel(developing[o]),
+        outlookIdentityStable: outlookIdentityIsStable(developing[o]),
+        latitude: Number(developing[o].latitude),
+        longitude: Number(developing[o].longitude),
         label: String(developing[o].classificationLabel || "Developing system"),
         chance: chance,
         distanceKm: outlookProximity.distanceKm,
@@ -863,13 +867,75 @@ function watchAlertSnapshot(storms, outlooks, places, thresholdValue) {
   return output
 }
 
+function outlookIdentityLabel(system) {
+  var source = String(system && (
+    system.outlookIdentity || system.name || system.title) || "")
+  return source.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+}
+
+function outlookIdentityIsStable(system) {
+  var classification = String(system && system.classificationLabel || "").toLowerCase()
+  var identity = outlookIdentityLabel(system)
+  return (classification !== "" && classification !== "developing system")
+    || /(^| )(al|ep|cp)[0-9]{2}($| )/.test(identity)
+}
+
+function outlookSnapshotIdentityMatches(first, second, requireMatchingContent) {
+  if (!first || !second || String(first.basin || "") !== String(second.basin || ""))
+    return false
+  var firstIdentity = outlookIdentityLabel(first)
+  var secondIdentity = outlookIdentityLabel(second)
+  var coordinatesAvailable = validCoordinate(first.latitude, first.longitude)
+    && validCoordinate(second.latitude, second.longitude)
+  var distance = coordinatesAvailable ? haversineDistanceKm(
+    first.latitude, first.longitude, second.latitude, second.longitude) : Infinity
+  if (firstIdentity !== "" && firstIdentity === secondIdentity) {
+    if (first.outlookIdentityStable === true || second.outlookIdentityStable === true)
+      return true
+    return !coordinatesAvailable || distance <= 1800
+  }
+  if (requireMatchingContent) return false
+  // Geographic headings can change as the same disturbance moves. Across the
+  // normal NHC update cadence, a nearby marker is a safer identity than its
+  // ordinal list number.
+  return coordinatesAvailable && distance <= 350
+}
+
+function matchingSnapshotEntry(before, item, usedKeys) {
+  var source = before || {}
+  var used = usedKeys || {}
+  var directKey = String(item && item.key || "")
+  var direct = directKey ? source[directKey] : null
+  if (direct && !used[directKey]) {
+    // A reused NHC ordinal must not make different content inherit the old
+    // baseline merely because the replacement happens to be nearby.
+    if (item.kind !== "outlook" || outlookSnapshotIdentityMatches(direct, item, true))
+      return { key: directKey, item: direct }
+  }
+  if (!item || item.kind !== "outlook") return null
+  for (var key in source) {
+    if (used[key] || key === directKey) continue
+    var candidate = source[key]
+    if (!candidate || candidate.kind !== "outlook") continue
+    if (String(candidate.scope || "") !== String(item.scope || "")) continue
+    if (item.scope === "place"
+        && String(candidate.placeId || "") !== String(item.placeId || "")) continue
+    if (outlookSnapshotIdentityMatches(candidate, item))
+      return { key: key, item: candidate }
+  }
+  return null
+}
+
 function watchAlertEvents(previous, current) {
   var before = previous || {}
   var after = current || {}
   var events = []
+  var used = ({})
   for (var key in after) {
     var item = after[key]
-    var old = before[key]
+    var match = matchingSnapshotEntry(before, item, used)
+    var old = match ? match.item : null
+    if (match) used[match.key] = true
     if (watchSnapshotRank(item) > watchSnapshotRank(old)) events.push(item)
   }
   return events
@@ -1105,6 +1171,9 @@ function alertSnapshot(storms, outlooks, regionValue, thresholdValue, includeNam
     output[outlookKey] = {
       kind: "outlook", key: outlookKey, name: String(developing[o].name || developing[o].title || "Developing system"),
       basin: String(developing[o].basin || ""), label: String(developing[o].classificationLabel || "Developing system"),
+      outlookIdentity: outlookIdentityLabel(developing[o]),
+      outlookIdentityStable: outlookIdentityIsStable(developing[o]),
+      latitude: Number(developing[o].latitude), longitude: Number(developing[o].longitude),
       chance: chance, meetsThreshold: chance >= threshold
     }
   }
@@ -1115,9 +1184,12 @@ function alertEvents(previous, current) {
   var before = previous || {}
   var after = current || {}
   var events = []
+  var used = ({})
   for (var key in after) {
     var item = after[key]
-    var old = before[key]
+    var match = matchingSnapshotEntry(before, item, used)
+    var old = match ? match.item : null
+    if (match) used[match.key] = true
     if (item.kind === "storm" && !old) events.push(item)
     if (item.kind === "outlook" && item.meetsThreshold && (!old || !old.meetsThreshold)) events.push(item)
   }

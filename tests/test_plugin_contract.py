@@ -246,9 +246,10 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('shell toggle " + root.pluginId', bar_widget)
         self.assertIn('visible: root.indicatorCount > 0', bar_widget)
         self.assertIn('text: String(root.indicatorCount)', bar_widget)
-        self.assertIn("root.personalAlertCount > 0", bar_widget)
-        self.assertIn('shell summon " + root.pluginId', bar_widget)
-        self.assertIn(r'\"alerts\":true', bar_widget)
+        self.assertIn("readonly property int personalAlertCount", bar_widget)
+        self.assertNotIn('shell summon " + root.pluginId', bar_widget)
+        self.assertNotIn(r'\"alerts\":true', bar_widget)
+        self.assertIn(r'\"activity\":true', bar_widget)
         self.assertIn("function openSource()", bar_widget)
         self.assertIn("root.bar.shell.hide(root.pluginId)", bar_widget)
         self.assertIn("All locations quiet", bar_widget)
@@ -262,7 +263,6 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("root.indicatorCount > 0 || root.limitedCoverage", bar_widget)
         self.assertIn("Saved locations outside NHC coverage", bar_widget)
         self.assertIn("location outside NHC coverage", bar_widget)
-        self.assertIn("root.personalAlertCount > 0 || root.limitedCoverage", bar_widget)
 
     def test_bar_surfaces_partial_watch_data(self):
         bar_widget = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
@@ -271,6 +271,13 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("readonly property bool partialWatchData", bar_widget)
         self.assertIn("NHC data partial", bar_widget)
         self.assertIn("} else if (partialWatchData) {", bar_widget)
+
+    def test_alerts_header_never_calls_limited_destinations_quiet(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+
+        self.assertIn("readonly property int alertLimitedDestinationCount", overlay)
+        self.assertIn(" LOCATION HAS LIMITED COVERAGE", overlay)
+        self.assertIn(" LOCATIONS HAVE LIMITED COVERAGE", overlay)
 
 
 if __name__ == "__main__":
