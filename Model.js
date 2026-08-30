@@ -726,6 +726,29 @@ function watchAttentionRank(level) {
   return 0
 }
 
+function watchAttentionCount(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  var count = 0
+  for (var i = 0; i < rows.length; i++)
+    if (watchAttentionRank(rows[i] && rows[i].state) > 0) count++
+  return count
+}
+
+function watchStrongestAttentionState(summaries) {
+  var rows = Array.isArray(summaries) ? summaries : []
+  var strongest = ""
+  var strongestRank = 0
+  for (var i = 0; i < rows.length; i++) {
+    var state = String(rows[i] && rows[i].state || "")
+    var rank = watchAttentionRank(state)
+    if (rank > strongestRank) {
+      strongest = state
+      strongestRank = rank
+    }
+  }
+  return strongest
+}
+
 function watchSnapshotRank(item) {
   if (!item) return 0
   var requested = Number(item.attentionRank)

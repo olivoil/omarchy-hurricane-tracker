@@ -46,24 +46,9 @@ Item {
   readonly property string mapSelectedKey: sidebarMode === "activity" ? selectedKey
     : (selectedPlaceSummary ? String(selectedPlaceSummary.systemKey || "") : "")
   readonly property int alertDestinationCount: watchPlaces.length
-  readonly property int alertUpdateCount: {
-    var count = 0
-    for (var i = 0; i < watchPlaceSummaries.length; i++) {
-      var state = String(watchPlaceSummaries[i] && watchPlaceSummaries[i].state || "")
-      if (state === "urgent" || state === "monitor" || state === "heads-up") count++
-    }
-    return count
-  }
-  readonly property string alertAttentionState: {
-    var strongest = ""
-    for (var i = 0; i < watchPlaceSummaries.length; i++) {
-      var state = String(watchPlaceSummaries[i] && watchPlaceSummaries[i].state || "")
-      if (state === "urgent") return "urgent"
-      if (state === "monitor") strongest = "monitor"
-      else if (state === "heads-up" && strongest === "") strongest = "heads-up"
-    }
-    return strongest
-  }
+  readonly property int alertUpdateCount: Model.watchAttentionCount(watchPlaceSummaries)
+  readonly property string alertAttentionState:
+    Model.watchStrongestAttentionState(watchPlaceSummaries)
   readonly property int dataFeedCount: 1
   readonly property var trackerDefinitions: [
     {
@@ -503,9 +488,15 @@ Item {
     return Model.safeOfficialUrl(storm && storm[field])
   }
 
+  function openBrowser(url) {
+    var safeUrl = Model.safeOfficialUrl(url)
+    if (!safeUrl) return
+    Quickshell.execDetached(["omarchy-launch-browser", safeUrl])
+    dismiss()
+  }
+
   function openOfficial(storm, field) {
-    var url = officialUrl(storm, field)
-    if (url) Quickshell.execDetached(["omarchy-launch-browser", url])
+    openBrowser(officialUrl(storm, field))
   }
 
   function handleHyprlandEvent(event) {
@@ -2022,7 +2013,7 @@ Item {
                   width: parent.width
                   height: root.minimumTouchTarget
                   text: root.draftPlaceName
-                  placeholderText: "Home, Dad, Cancún"
+                  placeholderText: "Home, Beach House, Mom’s Place"
                   maximumLength: 40
                   foreground: root.foreground
                   accent: root.accent
@@ -2805,9 +2796,7 @@ Item {
               iconSize: root.typeCaption
               horizontalPadding: 0
               verticalPadding: 0
-              onClicked: Quickshell.execDetached([
-                "omarchy-launch-browser", "https://www.nhc.noaa.gov/"
-              ])
+              onClicked: root.openBrowser("https://www.nhc.noaa.gov/")
             }
           }
         }

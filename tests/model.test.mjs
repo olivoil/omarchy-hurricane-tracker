@@ -225,6 +225,14 @@ assert.equal(urgentSummary.state, "urgent")
 assert.match(urgentSummary.detail, /closest forecast .* · ~2d$/)
 assert.equal(model.watchAlertEvents(monitorSnapshot, urgentSnapshot)[0].attentionLevel, "urgent")
 assert.equal(model.watchAlertEvents(urgentSnapshot, urgentSnapshot).length, 0)
+assert.equal(model.watchAttentionCount([
+  { state: "quiet" }, { state: "heads-up" }, { state: "monitor" }, { state: "unsupported" }
+]), 2)
+assert.equal(model.watchAttentionCount(null), 0)
+assert.equal(model.watchStrongestAttentionState([
+  { state: "quiet" }, { state: "heads-up" }, { state: "monitor" }, { state: "urgent" }
+]), "urgent")
+assert.equal(model.watchStrongestAttentionState([{ state: "quiet" }]), "")
 
 const yucatanDeparting = {
   ...yucatanApproach,

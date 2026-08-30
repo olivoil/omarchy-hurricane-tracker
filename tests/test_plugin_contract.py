@@ -71,6 +71,15 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('text: String(root.alertUpdateCount)', overlay)
         self.assertIn('if (payload.alerts === true) sidebarMode = "alerts"', overlay)
         self.assertIn('"WATCHED LOCATIONS"', overlay)
+        self.assertIn('function openBrowser(url)', overlay)
+        self.assertIn('Quickshell.execDetached(["omarchy-launch-browser", safeUrl])', overlay)
+        open_browser = overlay.split("function openBrowser(url)", 1)[1].split(
+            "function openOfficial", 1
+        )[0]
+        self.assertIn("dismiss()", open_browser)
+        self.assertIn('onClicked: root.openBrowser("https://www.nhc.noaa.gov/")', overlay)
+        self.assertIn('placeholderText: "Home, Beach House, Mom’s Place"', overlay)
+        self.assertNotIn("Home, Dad", overlay)
 
     def test_overlay_has_readable_minimum_type_and_touch_tokens(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
@@ -85,6 +94,15 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('shell.serviceFor(pluginId)', overlay)
         self.assertIn('bar.shell.serviceFor(pluginId)', bar_widget)
         self.assertIn('shell toggle " + root.pluginId', bar_widget)
+        self.assertIn('visible: root.indicatorCount > 0', bar_widget)
+        self.assertIn('text: String(root.indicatorCount)', bar_widget)
+        self.assertIn("root.personalAlertCount > 0", bar_widget)
+        self.assertIn('shell summon " + root.pluginId', bar_widget)
+        self.assertIn(r'\"alerts\":true', bar_widget)
+        self.assertIn("function openSource()", bar_widget)
+        self.assertIn("root.bar.shell.hide(root.pluginId)", bar_widget)
+        self.assertIn("All locations quiet", bar_widget)
+        self.assertNotIn("left open", bar_widget)
 
 
 if __name__ == "__main__":
