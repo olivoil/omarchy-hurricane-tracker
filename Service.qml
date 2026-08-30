@@ -43,6 +43,7 @@ Item {
   property var placeAlertBaseline: ({})
   property bool placeAlertsArmed: false
   property string appliedPlaceAlertConfig: ""
+  property var previouslyIncompleteOutlookBasins: []
   property var pendingNotification: null
   property string watchProcessOutput: ""
   property string watchProcessError: ""
@@ -442,25 +443,17 @@ Item {
   }
 
   function armAlertsQuietly() {
-    if (!outlookDataComplete) {
-      alertsArmed = false
-      appliedAlertConfig = ""
-      return
-    }
     alertBaseline = currentAlertSnapshot()
     alertsArmed = alertsEnabled && hasLoaded && !stale && status === "fresh"
     appliedAlertConfig = alertConfigKey
+    previouslyIncompleteOutlookBasins = incompleteOutlookBasins.slice()
   }
 
   function armPlaceAlertsQuietly() {
-    if (!outlookDataComplete) {
-      placeAlertsArmed = false
-      appliedPlaceAlertConfig = ""
-      return
-    }
     placeAlertBaseline = currentPlaceAlertSnapshot()
     placeAlertsArmed = placeAlertsEnabled && hasLoaded && !stale && status === "fresh"
     appliedPlaceAlertConfig = placeAlertConfigKey
+    previouslyIncompleteOutlookBasins = incompleteOutlookBasins.slice()
   }
 
   function evaluateAlerts() {
@@ -471,18 +464,22 @@ Item {
       placeAlertBaseline = ({})
       placeAlertsArmed = false
       appliedPlaceAlertConfig = placeAlertConfigKey
+      previouslyIncompleteOutlookBasins = []
       return
     }
-    if (!outlookDataComplete) return
     var events = []
+    var incompleteForecastKeys = Model.incompleteForecastSystemKeys(storms)
     if (alertsEnabled) {
       var current = currentAlertSnapshot()
       if (!alertsArmed || appliedAlertConfig !== alertConfigKey) {
         alertBaseline = current
         alertsArmed = true
       } else {
-        events = events.concat(Model.alertEvents(alertBaseline, current))
-        alertBaseline = current
+        var stableAlerts = Model.stabilizedAlertSnapshots(
+          alertBaseline, current, incompleteOutlookBasins,
+          previouslyIncompleteOutlookBasins, [])
+        events = events.concat(Model.alertEvents(stableAlerts.before, stableAlerts.current))
+        alertBaseline = stableAlerts.current
       }
       appliedAlertConfig = alertConfigKey
     } else {
@@ -497,8 +494,12 @@ Item {
         placeAlertBaseline = placeCurrent
         placeAlertsArmed = true
       } else {
-        events = events.concat(Model.watchAlertEvents(placeAlertBaseline, placeCurrent))
-        placeAlertBaseline = placeCurrent
+        var stablePlaceAlerts = Model.stabilizedAlertSnapshots(
+          placeAlertBaseline, placeCurrent, incompleteOutlookBasins,
+          previouslyIncompleteOutlookBasins, incompleteForecastKeys)
+        events = events.concat(Model.watchAlertEvents(
+          stablePlaceAlerts.before, stablePlaceAlerts.current))
+        placeAlertBaseline = stablePlaceAlerts.current
       }
       appliedPlaceAlertConfig = placeAlertConfigKey
     } else {
@@ -506,6 +507,7 @@ Item {
       placeAlertsArmed = false
       appliedPlaceAlertConfig = placeAlertConfigKey
     }
+    previouslyIncompleteOutlookBasins = incompleteOutlookBasins.slice()
     events = Model.coalesceAlertEvents(events)
     if (events.length > 0) notifyEvents(events)
   }

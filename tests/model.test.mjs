@@ -123,6 +123,41 @@ assert.equal(model.alertEvents({}, quietSnapshot).length, 0)
 const developing = { ...outlook, sevenDayChance: 40 }
 const developingSnapshot = model.alertSnapshot([], [developing], "Atlantic", "Medium (40%)", true)
 assert.equal(model.alertEvents(quietSnapshot, developingSnapshot)[0].name, "Dolly")
+const partialGlobalSnapshot = model.alertSnapshot(
+  [storm], [], "Atlantic", "Medium (40%)", true
+)
+const stabilizedGlobal = model.stabilizedAlertSnapshots(
+  developingSnapshot, partialGlobalSnapshot, ["al"], [], []
+)
+assert.equal(stabilizedGlobal.current["outlook:al-outlook-1"].meetsThreshold, true)
+assert.deepEqual(
+  Array.from(model.alertEvents(stabilizedGlobal.before, stabilizedGlobal.current), item => item.key),
+  ["storm:al012026"]
+)
+const recoveredGlobalSnapshot = model.alertSnapshot(
+  [storm], [developing], "Atlantic", "Medium (40%)", true
+)
+const stabilizedRecovery = model.stabilizedAlertSnapshots(
+  stabilizedGlobal.current, recoveredGlobalSnapshot, [], ["al"], []
+)
+assert.equal(model.alertEvents(stabilizedRecovery.before, stabilizedRecovery.current).length, 0)
+const easternPacificDeveloping = {
+  ...developing,
+  id: "ep-outlook-1",
+  basin: "ep",
+  name: "Eastern Pacific wave"
+}
+const healthyBasinDuringPartial = model.stabilizedAlertSnapshots(
+  model.alertSnapshot([], [developing], "All NHC basins", "Medium (40%)", true),
+  model.alertSnapshot([], [easternPacificDeveloping], "All NHC basins", "Medium (40%)", true),
+  ["al"], [], []
+)
+assert.deepEqual(
+  Array.from(model.alertEvents(
+    healthyBasinDuringPartial.before, healthyBasinDuringPartial.current
+  ), item => item.key),
+  ["outlook:ep-outlook-1"]
+)
 
 const home = {
   id: "home",
@@ -253,6 +288,34 @@ const caribbeanMonitor = {
 const monitorSnapshot = model.watchAlertSnapshot([caribbeanMonitor], [], [cancun], "Medium (40%)")
 assert.equal(monitorSnapshot["place:cancun|storm:al022026"].attentionLevel, "monitor")
 assert.equal(model.watchPlaceSummaries([caribbeanMonitor], [], [cancun], "Medium (40%)")[0].state, "monitor")
+
+const incompleteForecastStorm = {
+  ...caribbeanMonitor,
+  track: [],
+  cone: [],
+  dataWarnings: ["track unavailable"]
+}
+const incompleteForecastSnapshot = model.watchAlertSnapshot(
+  [incompleteForecastStorm], [], [cancun], "Medium (40%)"
+)
+const incompleteForecastKeys = model.incompleteForecastSystemKeys([incompleteForecastStorm])
+assert.deepEqual(Array.from(incompleteForecastKeys), ["storm:al022026"])
+const stabilizedForecast = model.stabilizedAlertSnapshots(
+  monitorSnapshot, incompleteForecastSnapshot, [], [], incompleteForecastKeys
+)
+assert.equal(
+  stabilizedForecast.current["place:cancun|storm:al022026"].attentionLevel,
+  "monitor"
+)
+assert.equal(model.watchAlertEvents(
+  stabilizedForecast.before, stabilizedForecast.current
+).length, 0)
+const recoveredForecast = model.stabilizedAlertSnapshots(
+  stabilizedForecast.current, monitorSnapshot, [], [], []
+)
+assert.equal(model.watchAlertEvents(
+  recoveredForecast.before, recoveredForecast.current
+).length, 0)
 
 const coneOnlyStorm = {
   ...caribbeanMonitor,

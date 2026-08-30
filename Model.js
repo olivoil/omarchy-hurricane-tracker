@@ -854,6 +854,73 @@ function watchAlertEvents(previous, current) {
   return events
 }
 
+function stringSet(values) {
+  var rows = Array.isArray(values) ? values : []
+  var output = ({})
+  for (var i = 0; i < rows.length; i++) {
+    var value = String(rows[i] || "")
+    if (value) output[value] = true
+  }
+  return output
+}
+
+function copySnapshot(snapshot) {
+  var source = snapshot || {}
+  var output = ({})
+  for (var key in source) output[key] = source[key]
+  return output
+}
+
+function incompleteForecastSystemKeys(storms) {
+  var rows = Array.isArray(storms) ? storms : []
+  var output = []
+  var seen = ({})
+  for (var i = 0; i < rows.length; i++) {
+    var storm = rows[i]
+    var warnings = Array.isArray(storm && storm.dataWarnings) ? storm.dataWarnings : []
+    var incomplete = false
+    for (var w = 0; w < warnings.length; w++) {
+      if (warnings[w] === "track unavailable" || warnings[w] === "cone unavailable") {
+        incomplete = true
+        break
+      }
+    }
+    var key = "storm:" + String(storm && storm.id || "")
+    if (incomplete && key !== "storm:" && !seen[key]) {
+      seen[key] = true
+      output.push(key)
+    }
+  }
+  return output
+}
+
+function stabilizedAlertSnapshots(previous, current, incompleteOutlookBasins,
+    previouslyIncompleteOutlookBasins, incompleteSystemKeys) {
+  var before = copySnapshot(previous)
+  var after = copySnapshot(current)
+  var incompleteOutlooks = stringSet(incompleteOutlookBasins)
+  var recoveredOutlooks = stringSet(previouslyIncompleteOutlookBasins)
+  var incompleteSystems = stringSet(incompleteSystemKeys)
+  var key
+  for (key in after) {
+    var currentItem = after[key]
+    if (currentItem && currentItem.kind === "outlook"
+        && recoveredOutlooks[String(currentItem.basin || "")] && !(key in before))
+      before[key] = currentItem
+  }
+  for (key in before) {
+    var previousItem = before[key]
+    if (!previousItem) continue
+    var preserveOutlook = previousItem.kind === "outlook"
+      && incompleteOutlooks[String(previousItem.basin || "")]
+    var systemKey = previousItem.scope === "place"
+      ? String(previousItem.systemKey || "") : String(previousItem.key || "")
+    var preserveSystem = previousItem.kind === "storm" && incompleteSystems[systemKey]
+    if (preserveOutlook || preserveSystem) after[key] = previousItem
+  }
+  return { before: before, current: after }
+}
+
 function alertEventSystemKey(event) {
   if (!event) return ""
   return String(event.scope === "place" ? event.systemKey || "" : event.key || "")

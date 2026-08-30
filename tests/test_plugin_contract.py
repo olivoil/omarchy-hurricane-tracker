@@ -188,7 +188,9 @@ class PluginContractTests(unittest.TestCase):
 
         self.assertIn('"incompleteOutlookBasins"', backend)
         self.assertIn("readonly property bool outlookDataComplete", service)
-        self.assertIn("if (!outlookDataComplete) return", service)
+        self.assertNotIn("if (!outlookDataComplete) return", service)
+        self.assertIn("Model.stabilizedAlertSnapshots", service)
+        self.assertIn("Model.incompleteForecastSystemKeys", service)
         self.assertIn('"DATA PARTIAL"', overlay)
 
     def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):

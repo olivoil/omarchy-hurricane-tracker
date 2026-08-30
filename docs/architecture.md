@@ -109,5 +109,7 @@ two-day and seven-day probabilities, discussion excerpt, marker, and bounded
 formation polygons. Partial detail failure leaves the current cyclone visible
 and adds a `dataWarnings` entry rather than dropping the whole advisory. Failed
 outlook products are listed in `incompleteOutlookBasins`; available data stays
-visible, the UI reports a partial feed, and alert baselines remain frozen until
-all outlook products are complete again.
+visible and the UI reports a partial feed. Only baseline entries tied to a
+failed outlook basin or incomplete forecast geometry remain frozen; complete
+basins, named storms, and unrelated watched-place transitions continue to be
+evaluated.
