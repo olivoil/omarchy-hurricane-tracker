@@ -463,7 +463,7 @@ Item {
   }
 
   function evaluateAlerts() {
-    if (!settingsReady || !hasLoaded || stale || status !== "fresh") {
+    if (!settingsReady || !hasLoaded) {
       alertBaseline = ({})
       alertsArmed = false
       appliedAlertConfig = alertConfigKey
@@ -472,6 +472,9 @@ Item {
       appliedPlaceAlertConfig = placeAlertConfigKey
       return
     }
+    // A failed refresh must not turn the next fresh payload into a new quiet
+    // baseline. Retain the last fresh comparison until the feed recovers.
+    if (stale || status !== "fresh") return
     var events = []
     var incompleteForecastKeys = root.incompleteForecastSystemKeys
     if (alertsEnabled) {

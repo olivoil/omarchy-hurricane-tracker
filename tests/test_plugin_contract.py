@@ -203,6 +203,15 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("tracker.watchPlaceSummaries", (ROOT / "BarWidget.qml").read_text(encoding="utf-8"))
         self.assertIn('"DATA PARTIAL"', overlay)
 
+    def test_full_outages_preserve_the_last_fresh_alert_baselines(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        evaluate = service.split("function evaluateAlerts()", 1)[1].split(
+            "var events = []", 1
+        )[0]
+
+        self.assertIn("if (!settingsReady || !hasLoaded)", evaluate)
+        self.assertIn('if (stale || status !== "fresh") return', evaluate)
+
     def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         self.assertIn('property bool draftPlaceNameManuallyEdited: false', overlay)
