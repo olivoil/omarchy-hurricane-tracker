@@ -880,7 +880,7 @@ function outlookIdentityIsStable(system) {
     || /(^| )(al|ep|cp)[0-9]{2}($| )/.test(identity)
 }
 
-function outlookSnapshotIdentityMatches(first, second, requireMatchingContent) {
+function outlookSnapshotIdentityMatches(first, second) {
   if (!first || !second || String(first.basin || "") !== String(second.basin || ""))
     return false
   var firstIdentity = outlookIdentityLabel(first)
@@ -889,16 +889,10 @@ function outlookSnapshotIdentityMatches(first, second, requireMatchingContent) {
     && validCoordinate(second.latitude, second.longitude)
   var distance = coordinatesAvailable ? haversineDistanceKm(
     first.latitude, first.longitude, second.latitude, second.longitude) : Infinity
-  if (firstIdentity !== "" && firstIdentity === secondIdentity) {
-    if (first.outlookIdentityStable === true || second.outlookIdentityStable === true)
-      return true
-    return !coordinatesAvailable || distance <= 1800
-  }
-  if (requireMatchingContent) return false
-  // Geographic headings can change as the same disturbance moves. Across the
-  // normal NHC update cadence, a nearby marker is a safer identity than its
-  // ordinal list number.
-  return coordinatesAvailable && distance <= 350
+  if (firstIdentity === "" || firstIdentity !== secondIdentity) return false
+  if (first.outlookIdentityStable === true || second.outlookIdentityStable === true)
+    return true
+  return !coordinatesAvailable || distance <= 1800
 }
 
 function matchingSnapshotEntry(before, item, usedKeys) {
@@ -907,9 +901,7 @@ function matchingSnapshotEntry(before, item, usedKeys) {
   var directKey = String(item && item.key || "")
   var direct = directKey ? source[directKey] : null
   if (direct && !used[directKey]) {
-    // A reused NHC ordinal must not make different content inherit the old
-    // baseline merely because the replacement happens to be nearby.
-    if (item.kind !== "outlook" || outlookSnapshotIdentityMatches(direct, item, true))
+    if (item.kind !== "outlook" || outlookSnapshotIdentityMatches(direct, item))
       return { key: directKey, item: direct }
   }
   if (!item || item.kind !== "outlook") return null

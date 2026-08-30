@@ -168,6 +168,15 @@ assert.equal(model.alertEvents(
     longitude: developing.longitude
   }], "Atlantic", "Medium (40%)", true)
 ).length, 1)
+assert.equal(model.alertEvents(
+  developingSnapshot,
+  model.alertSnapshot([], [{
+    ...reusedOutlookOrdinal,
+    id: "al-outlook-2",
+    latitude: developing.latitude,
+    longitude: developing.longitude + 0.5
+  }], "Atlantic", "Medium (40%)", true)
+).length, 1)
 const partialGlobalSnapshot = model.alertSnapshot(
   [storm], [], "Atlantic", "Medium (40%)", true
 )
@@ -310,6 +319,13 @@ const reusedPlaceOrdinal = {
 assert.equal(model.watchAlertEvents(
   formationSnapshot,
   model.watchAlertSnapshot([], [reusedPlaceOrdinal], [family], "Medium (40%)")
+).length, 1)
+assert.equal(model.watchAlertEvents(
+  formationSnapshot,
+  model.watchAlertSnapshot([], [{
+    ...reusedPlaceOrdinal,
+    id: "al-outlook-2"
+  }], [family], "Medium (40%)")
 ).length, 1)
 const lowFormationSnapshot = model.watchAlertSnapshot([], [outlook], [family], "Medium (40%)")
 assert.equal(model.watchAlertEvents(lowFormationSnapshot, formationSnapshot).length, 1)
