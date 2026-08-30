@@ -89,6 +89,34 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('placeholderText: "Home, Beach House, Mom’s Place"', overlay)
         self.assertNotIn("Home, Dad", overlay)
 
+    def test_tracker_rows_begin_directly_below_the_introduction_separator(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        tracker_menu_lead = overlay.split('id: trackerMenuPanel', 1)[1].split(
+            'Repeater {', 1
+        )[0]
+
+        self.assertNotIn('height: Style.space(8)', tracker_menu_lead)
+
+    def test_selected_watch_location_reveals_full_alert_copy(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        place_row = overlay.split('id: placeRow', 1)[1].split(
+            'QQC.ScrollBar.vertical', 1
+        )[0]
+
+        self.assertIn('readonly property bool summaryExpanded: isSelected', place_row)
+        self.assertIn('height: summaryExpanded', place_row)
+        self.assertIn(
+            'wrapMode: placeRow.summaryExpanded ? Text.WordWrap : Text.NoWrap',
+            place_row,
+        )
+        self.assertIn(
+            'elide: placeRow.summaryExpanded ? Text.ElideNone',
+            place_row,
+        )
+        self.assertIn('placePrimaryText.truncated', place_row)
+        self.assertIn('placeSecondaryText.truncated', place_row)
+        self.assertIn('QQC.ToolTip.visible:', place_row)
+
     def test_overlay_has_readable_minimum_type_and_touch_tokens(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         self.assertIn("readonly property int typeMicro", overlay)

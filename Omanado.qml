@@ -1707,11 +1707,6 @@ Item {
               }
             }
 
-            Item {
-              width: parent.width
-              height: Style.space(8)
-            }
-
             Repeater {
               model: root.trackerDefinitions
 
@@ -2872,10 +2867,33 @@ Item {
                 readonly property var summary: modelData
                 readonly property var place: summary.place
                 readonly property bool isSelected: place && place.id === root.selectedPlaceId
+                readonly property bool summaryExpanded: isSelected
+                readonly property real compactHeight: Style.space(108)
+                readonly property real summaryTop: Style.space(60)
+                readonly property string primarySummaryText:
+                  summary.event || summary.state === "limited"
+                    ? String(summary.detail || "")
+                    : root.watchPlaceRuleLabel(place)
+                readonly property string secondarySummaryText: summary.event
+                  ? root.watchPlaceRuleLabel(place) : root.watchPlaceScopeLabel(summary)
+                readonly property bool summaryTruncated: placePrimaryText.truncated
+                  || placeSecondaryText.truncated
+                  || placePrimaryText.implicitWidth > placePrimaryText.width
+                  || placeSecondaryText.implicitWidth > placeSecondaryText.width
                 width: watchPlaceList.width
-                height: Style.space(108)
+                height: summaryExpanded
+                  ? Math.max(compactHeight,
+                    summaryTop + placeRules.implicitHeight + Style.space(10))
+                  : compactHeight
                 color: isSelected ? Style.selectedFillFor(root.foreground, root.accent)
                   : (placeMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+
+                QQC.ToolTip.visible: !placeRow.summaryExpanded
+                  && placeMouse.containsMouse && placeRow.summaryTruncated
+                QQC.ToolTip.delay: 550
+                QQC.ToolTip.timeout: 6000
+                QQC.ToolTip.text: placeRow.primarySummaryText + "\n"
+                  + placeRow.secondarySummaryText
 
                 Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -2951,7 +2969,7 @@ Item {
                   anchors.right: parent.right
                   anchors.rightMargin: placeActions.visible ? Style.space(96) : Style.space(12)
                   anchors.top: parent.top
-                  anchors.topMargin: Style.space(60)
+                  anchors.topMargin: placeRow.summaryTop
                   spacing: Style.space(5)
 
                   Row {
@@ -2959,7 +2977,8 @@ Item {
                     spacing: Style.space(6)
 
                     Rectangle {
-                      anchors.verticalCenter: parent.verticalCenter
+                      anchors.top: parent.top
+                      anchors.topMargin: Style.space(6)
                       width: Style.space(5)
                       height: width
                       radius: width / 2
@@ -2967,16 +2986,17 @@ Item {
                         ? root.placeStateColor(summary) : root.accent
                     }
                     Text {
-                      anchors.verticalCenter: parent.verticalCenter
+                      id: placePrimaryText
                       width: parent.width - Style.space(11)
-                      text: summary.event || summary.state === "limited"
-                        ? String(summary.detail || "")
-                        : root.watchPlaceRuleLabel(place)
+                      text: placeRow.primarySummaryText
                       textFormat: Text.PlainText
                       color: root.foreground
-                      elide: summary.event ? Text.ElideMiddle : Text.ElideRight
+                      wrapMode: placeRow.summaryExpanded ? Text.WordWrap : Text.NoWrap
+                      elide: placeRow.summaryExpanded ? Text.ElideNone
+                        : (summary.event ? Text.ElideMiddle : Text.ElideRight)
                       font.family: Style.font.menuFamily
                       font.pixelSize: root.typeCaption
+                      lineHeight: 1.3
                     }
                   }
                   Row {
@@ -2984,22 +3004,24 @@ Item {
                     spacing: Style.space(6)
 
                     Rectangle {
-                      anchors.verticalCenter: parent.verticalCenter
+                      anchors.top: parent.top
+                      anchors.topMargin: Style.space(6)
                       width: Style.space(5)
                       height: width
                       radius: width / 2
                       color: root.mapMuted
                     }
                     Text {
-                      anchors.verticalCenter: parent.verticalCenter
+                      id: placeSecondaryText
                       width: parent.width - Style.space(11)
-                      text: summary.event ? root.watchPlaceRuleLabel(place)
-                        : root.watchPlaceScopeLabel(summary)
+                      text: placeRow.secondarySummaryText
                       textFormat: Text.PlainText
                       color: root.dim
-                      elide: Text.ElideRight
+                      wrapMode: placeRow.summaryExpanded ? Text.WordWrap : Text.NoWrap
+                      elide: placeRow.summaryExpanded ? Text.ElideNone : Text.ElideRight
                       font.family: Style.font.menuFamily
                       font.pixelSize: root.typeCaption
+                      lineHeight: 1.3
                     }
                   }
                 }
