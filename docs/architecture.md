@@ -20,6 +20,13 @@ place-proximity alerts, then sends at most one grouped notification for a
 refresh. This avoids one network poll per monitor and avoids startup
 notification floods.
 
+The service also resolves the system measurement family once from Qt's locale,
+so the bar, overlay, and notifications present the same units. Model formatters
+convert at the presentation boundary. Watch radii, proximity calculations, and
+map geometry remain canonical kilometres, while source wind speeds remain
+canonical mph. This keeps saved alert behavior stable and gives future tracker
+modes, including earthquakes, one shared unit policy.
+
 Watch places are a versioned local configuration, not part of the public NHC
 payload. The helper validates at most 12 named coordinates with bounded radii
 and atomically writes them with user-only permissions under the XDG config

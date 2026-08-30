@@ -41,9 +41,15 @@ const storm = {
 assert.equal(model.classificationLabel(storm), "Category 2 hurricane")
 assert.equal(model.severityCode(storm), "2")
 assert.equal(model.severityColor(storm), "#ee9858")
-assert.equal(model.formatWind(storm), "105 mph")
+assert.equal(model.formatWind(storm, true), "105 mph")
+assert.equal(model.formatWind(storm, false), "169 km/h")
 assert.equal(model.formatPressure(storm), "968 mb")
-assert.equal(model.formatMovement(storm), "WNW at 12 mph")
+assert.equal(model.formatMovement(storm, true), "WNW at 12 mph")
+assert.equal(model.formatMovement(storm, false), "WNW at 19 km/h")
+assert.equal(model.systemMetric(storm, false), "169 km/h")
+assert.equal(model.formatDistanceKm(1000, false, 5), "1,000 km")
+assert.equal(model.formatDistanceKm(1000, true, 5), "620 mi")
+assert.equal(model.watchDistanceLabel(160.9344, true), "100 mi away")
 assert.equal(model.advisoryLabel(storm, Date.parse("2026-08-28T18:00:00Z")), "Advisory 14 · 3h ago")
 assert.equal(model.forecastHourLabel({ forecastHour: 0 }), "Now")
 assert.equal(model.forecastHourLabel({ forecastHour: 48 }), "+48h")
@@ -174,6 +180,10 @@ const cancun = {
   longitude: -86.8261,
   radiusKm: 1000
 }
+assert.equal(
+  model.watchPlaceSummaries([], [], [cancun], "Medium (40%)", true)[0].detail,
+  "620 mi forecast awareness · NHC only"
+)
 const caribbeanFormation = {
   ...outlook,
   id: "al-outlook-caribbean",

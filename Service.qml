@@ -85,6 +85,8 @@ Item {
   readonly property string formationThreshold: String(setting("formationThreshold", "Medium (40%)"))
   readonly property bool notifyNamedStorms: setting("notifyNamedStorms", true) === true
   readonly property bool onlinePlaceSearchEnabled: setting("onlinePlaceSearch", true) === true
+  readonly property bool useImperial:
+    Qt.locale().measurementSystem !== Locale.MetricSystem
   readonly property string alertConfigKey: alertRegion + "|" + formationThreshold + "|" + notifyNamedStorms
   readonly property string placeAlertConfigKey: formationThreshold + "|" + JSON.stringify(watchPlaces)
   readonly property bool alertsEnabled: Model.alertRegionCode(alertRegion) !== ""
@@ -498,18 +500,20 @@ Item {
       if (event.scope === "place" && event.kind === "storm"
           && event.attentionLevel === "urgent") {
         headline = event.name + " is approaching " + event.placeName
-        description = "The cyclone is within the " + Math.round(Number(event.radiusKm || 0))
-          + " km awareness area and the NHC forecast continues materially closer"
+        description = "The cyclone is within the "
+          + Model.formatDistanceKm(event.radiusKm, useImperial, 5)
+          + " awareness area and the NHC forecast continues materially closer"
           + forecastLeadLabel(event.forecastHour) + ". Awareness only, not a local warning."
       } else if (event.scope === "place" && event.kind === "storm") {
         headline = event.name + " may pass near " + event.placeName
         description = "The NHC forecast cone or center track may come within the "
-          + Math.round(Number(event.radiusKm || 0)) + " km awareness area"
+          + Model.formatDistanceKm(event.radiusKm, useImperial, 5) + " awareness area"
           + forecastLeadLabel(event.forecastHour) + ". Awareness only, not a local warning."
       } else if (event.scope === "place") {
         headline = "Formation heads-up for " + event.placeName
         description = "An NHC 7-day formation area that may approach the "
-          + Math.round(Number(event.radiusKm || 0)) + " km awareness area has reached "
+          + Model.formatDistanceKm(event.radiusKm, useImperial, 5)
+          + " awareness area has reached "
           + Math.round(Number(event.chance || 0))
           + "% formation chance. No local track is available yet."
       } else {

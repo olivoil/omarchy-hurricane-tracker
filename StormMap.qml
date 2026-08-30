@@ -13,6 +13,7 @@ Item {
   property bool autoFitSelection: true
   property bool placementMode: false
   property var draftWatchPlace: null
+  property bool useImperial: false
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property bool selectedIsStorm: selectedSystem && selectedSystem.kind === "storm"
@@ -269,7 +270,8 @@ Item {
       hoveredPoint = forecast
       hoveredKey = ""
       hoverTitle = Model.forecastHourLabel(forecast) + " · " + Model.classificationLabel(forecast)
-      hoverDetail = Model.forecastTimeLabel(forecast) + " · " + Number(forecast.windMph || 0) + " mph"
+      hoverDetail = Model.forecastTimeLabel(forecast) + " · "
+        + Model.formatWind(forecast, useImperial)
       canvas.requestPaint()
       return
     }
@@ -279,7 +281,8 @@ Item {
     hoveredPlaceId = ""
     if (system) {
       hoverTitle = String(system.name || system.title || "Tropical system")
-      hoverDetail = Model.systemClassificationLabel(system) + " · " + Model.systemMetric(system)
+      hoverDetail = Model.systemClassificationLabel(system) + " · "
+        + Model.systemMetric(system, useImperial)
     } else {
       var place = nearestWatchPlace(x, y, 16)
       hoveredPlaceId = place ? place.id : ""

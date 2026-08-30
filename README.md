@@ -46,6 +46,12 @@ search is disabled.
 Hurricane Tracker checks for new NHC data every 15 minutes by default. You can
 change the interval in Omarchy's bar settings.
 
+Distances and speeds automatically follow the system measurement convention
+inherited from Omarchy: miles and mph for imperial locales, kilometres and
+km/h for metric locales. Alert radii stay stored in kilometres internally, so
+changing the display convention does not change an alert area. A manual unit
+override is not exposed yet.
+
 Broad basin notifications are off until you choose a basin. You can be notified when:
 
 - an outlook area's seven-day formation chance reaches 20%, 40%, or 70%; or
@@ -58,10 +64,10 @@ you will not get a burst of notifications for storms already underway.
 Open **Alerts** in the app header to save up to 12 locations such as home,
 family, or a destination. Search for a city, region, or postal code, or click
 its position directly on the globe. Give each location a watch radius from 250
-km to 2,000 km. A search result or nearby map place supplies the initial name,
-then the separate **Name** field lets you personalize it, so Sarasota can still
-be saved as “Mom’s Place.” The map keeps saved locations quiet as dots and
-reveals their alert areas while editing.
+km to 2,000 km, shown in the system's preferred units. A search result or nearby
+map place supplies the initial name, then the separate **Name** field lets you
+personalize it, so Sarasota can still be saved as “Mom’s Place.” The map keeps
+saved locations quiet as dots and reveals their alert areas while editing.
 Location notifications are sent when:
 
 - an NHC formation area within that radius reaches your formation threshold; or

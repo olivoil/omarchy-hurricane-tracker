@@ -373,17 +373,36 @@ function systemClassificationLabel(system) {
   return classificationLabel(system)
 }
 
-function systemMetric(system) {
-  return systemKind(system) === "outlook" ? outlookChanceLabel(system) : formatWind(system)
+function systemMetric(system, useImperial) {
+  return systemKind(system) === "outlook"
+    ? outlookChanceLabel(system) : formatWind(system, useImperial)
 }
 
 function discussionExcerpt(system) {
   return String(system && system.discussionExcerpt || "")
 }
 
-function formatWind(storm) {
+function groupedInteger(value) {
+  return String(Math.round(Number(value) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+}
+
+function formatDistanceKm(distanceKm, useImperial, roundingIncrement) {
+  var distance = Math.max(0, Number(distanceKm || 0))
+  var converted = useImperial === true ? distance * 0.621371192237334 : distance
+  var increment = Math.max(1, Math.round(Number(roundingIncrement || 1)))
+  var rounded = Math.round(converted / increment) * increment
+  return groupedInteger(rounded) + (useImperial === true ? " mi" : " km")
+}
+
+function formatSpeedMph(speedMph, useImperial) {
+  var speed = Math.max(0, Number(speedMph || 0))
+  var converted = useImperial === true ? speed : speed * 1.609344
+  return groupedInteger(converted) + (useImperial === true ? " mph" : " km/h")
+}
+
+function formatWind(storm, useImperial) {
   var mph = Math.max(0, Math.round(Number(storm && storm.windMph || 0)))
-  return mph > 0 ? mph + " mph" : "Wind unavailable"
+  return mph > 0 ? formatSpeedMph(mph, useImperial) : "Wind unavailable"
 }
 
 function formatPressure(storm) {
@@ -391,11 +410,11 @@ function formatPressure(storm) {
   return pressure > 0 ? pressure + " mb" : "Pressure unavailable"
 }
 
-function formatMovement(storm) {
+function formatMovement(storm, useImperial) {
   if (!storm) return "Movement unavailable"
   var direction = String(storm.movementDirectionLabel || "")
   var speed = Math.max(0, Math.round(Number(storm.movementSpeedMph || 0)))
-  if (direction && speed) return direction + " at " + speed + " mph"
+  if (direction && speed) return direction + " at " + formatSpeedMph(speed, useImperial)
   if (direction) return direction
   return "Movement unavailable"
 }
@@ -835,9 +854,10 @@ function watchAlertEvents(previous, current) {
   return events
 }
 
-function watchDistanceLabel(distanceKm) {
+function watchDistanceLabel(distanceKm, useImperial) {
   var distance = Math.max(0, Math.round(Number(distanceKm || 0)))
-  return distance < 10 ? "at the watch point" : distance + " km away"
+  return distance < 10 ? "at the watch point"
+    : formatDistanceKm(distance, useImperial) + " away"
 }
 
 function watchForecastLeadLabel(hours) {
@@ -847,7 +867,7 @@ function watchForecastLeadLabel(hours) {
   return " · ~" + Math.max(2, Math.round(value / 24)) + "d"
 }
 
-function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
+function watchPlaceSummaries(storms, outlooks, places, thresholdValue, useImperial) {
   var watches = Array.isArray(places) ? places : []
   var snapshot = watchAlertSnapshot(storms, outlooks, watches, thresholdValue)
   var output = []
@@ -869,7 +889,8 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
       state: coverage.supported ? "quiet" : "unsupported",
       status: coverage.supported ? "QUIET" : "LIMITED",
       detail: coverage.supported
-        ? place.radiusKm + " km forecast awareness · NHC only"
+        ? formatDistanceKm(place.radiusKm, useImperial, 5)
+          + " forecast awareness · NHC only"
         : coverage.label,
       systemKey: "",
       event: null
@@ -878,7 +899,7 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
       summary.state = "urgent"
       summary.status = "APPROACHING"
       summary.detail = selected.name + " · closest forecast "
-        + watchDistanceLabel(selected.forecastDistance)
+        + watchDistanceLabel(selected.forecastDistance, useImperial)
         + watchForecastLeadLabel(selected.forecastHour)
       summary.systemKey = selected.systemKey
       summary.event = selected
@@ -888,7 +909,8 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
       summary.detail = selected.proximitySource === "cone" && selected.distanceKm < 10
         ? selected.name + " · forecast cone reaches watch area"
           + watchForecastLeadLabel(selected.forecastHour)
-        : selected.name + " · forecast may pass " + watchDistanceLabel(selected.distanceKm)
+        : selected.name + " · forecast may pass "
+          + watchDistanceLabel(selected.distanceKm, useImperial)
           + watchForecastLeadLabel(selected.forecastHour)
       summary.systemKey = selected.systemKey
       summary.event = selected
@@ -898,7 +920,7 @@ function watchPlaceSummaries(storms, outlooks, places, thresholdValue) {
       summary.detail = selected.proximitySource === "area" && selected.distanceKm < 10
         ? selected.name + " · " + selected.chance + "% formation area reaches watch area"
         : selected.name + " · " + selected.chance + "% formation area may approach "
-          + watchDistanceLabel(selected.distanceKm)
+          + watchDistanceLabel(selected.distanceKm, useImperial)
       summary.systemKey = selected.systemKey
       summary.event = selected
     }

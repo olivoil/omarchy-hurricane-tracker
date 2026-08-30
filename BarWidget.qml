@@ -18,7 +18,7 @@ BarWidget {
   readonly property bool hasWatchPlaces: tracker ? tracker.watchPlaceCount > 0 : false
   readonly property var watchPlaceSummaries: hasWatchPlaces
     ? Model.watchPlaceSummaries(tracker.storms, tracker.outlooks,
-      tracker.watchPlaces, tracker.formationThreshold) : []
+      tracker.watchPlaces, tracker.formationThreshold, tracker.useImperial === true) : []
   readonly property int personalAlertCount: Model.watchAttentionCount(watchPlaceSummaries)
   readonly property string personalAttentionState:
     Model.watchStrongestAttentionState(watchPlaceSummaries)

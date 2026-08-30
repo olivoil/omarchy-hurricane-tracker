@@ -89,6 +89,26 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("readonly property int minimumTouchTarget", overlay)
         self.assertNotRegex(overlay, r"Math\.max\([678], Style\.font\.caption -")
 
+    def test_units_follow_the_system_locale_without_exposing_a_setting_yet(self):
+        manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "Qt.locale().measurementSystem !== Locale.MetricSystem",
+            service,
+        )
+        self.assertIn("readonly property bool useImperial", overlay)
+        self.assertIn("property bool useImperial: false", storm_map)
+        self.assertIn("useImperial: root.useImperial", overlay)
+        self.assertIn("Model.formatDistanceKm", service)
+        self.assertNotIn("unitSystem", manifest["barWidget"]["defaults"])
+        self.assertNotIn(
+            "unitSystem",
+            {item["key"] for item in manifest["barWidget"]["schema"]},
+        )
+
     def test_place_editor_supports_search_and_direct_map_placement(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")

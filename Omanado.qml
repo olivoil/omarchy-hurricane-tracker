@@ -43,6 +43,9 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.olivoil.hurricane-tracker"
   readonly property var tracker: shell ? shell.serviceFor(pluginId) : null
+  readonly property bool useImperial: tracker
+    ? tracker.useImperial === true
+    : Qt.locale().measurementSystem !== Locale.MetricSystem
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
   readonly property var outlooks: tracker && Array.isArray(tracker.outlooks) ? tracker.outlooks : []
   readonly property var watchPlaces: tracker && Array.isArray(tracker.watchPlaces) ? tracker.watchPlaces : []
@@ -67,7 +70,8 @@ Item {
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var regionalRows: Model.regionalRows(storms, outlooks)
   readonly property var watchPlaceSummaries: Model.watchPlaceSummaries(
-    storms, outlooks, watchPlaces, tracker ? tracker.formationThreshold : "Medium (40%)")
+    storms, outlooks, watchPlaces,
+    tracker ? tracker.formationThreshold : "Medium (40%)", useImperial)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property var selectedStorm: selectedSystem && selectedSystem.kind === "storm" ? selectedSystem : null
   readonly property var selectedOutlook: selectedSystem && selectedSystem.kind === "outlook" ? selectedSystem : null
@@ -180,9 +184,9 @@ Item {
       { label: "BASIN", value: String(system.basinLabel || Model.regionName(system.basin)) }
     ]
     return [
-      { label: "MAX WIND", value: Model.formatWind(system) },
+      { label: "MAX WIND", value: Model.formatWind(system, useImperial) },
       { label: "PRESSURE", value: Model.formatPressure(system) },
-      { label: "MOVEMENT", value: Model.formatMovement(system) }
+      { label: "MOVEMENT", value: Model.formatMovement(system, useImperial) }
     ]
   }
 
@@ -570,7 +574,7 @@ Item {
 
   function watchPlaceRuleLabel(place) {
     return "Forecast cone or 7-day formation area within "
-      + Math.round(Number(place && place.radiusKm || 1000)) + " km"
+      + Model.formatDistanceKm(place && place.radiusKm || 1000, useImperial, 5)
   }
 
   function watchPlaceScopeLabel(summary) {
@@ -962,6 +966,7 @@ Item {
           selectedPlaceId: root.selectedPlaceId
           placementMode: root.editingWatchPlace
           draftWatchPlace: root.draftWatchPlace
+          useImperial: root.useImperial
           bottomInset: root.sidebarMode === "activity" && root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean
@@ -1500,7 +1505,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
                 anchors.topMargin: Style.space(73)
-                text: String(forecast.windMph || 0) + " mph"
+                text: Model.formatWind(forecast, root.useImperial)
                 color: Model.severityColor(forecast)
                 font.family: Style.font.menuFamily
                 font.pixelSize: root.typeCaption
@@ -1994,7 +1999,8 @@ Item {
               }
               Text {
                 width: parent.width
-                text: system ? Model.systemClassificationLabel(system) + " · " + Model.systemMetric(system) : ""
+                text: system ? Model.systemClassificationLabel(system) + " · "
+                  + Model.systemMetric(system, root.useImperial) : ""
                 textFormat: Text.PlainText
                 color: root.dim
                 elide: Text.ElideRight
@@ -2017,7 +2023,8 @@ Item {
 
             Accessible.name: rowData.kind === "region" ? String(rowData.name || "Region") + " region"
               : (system ? String(system.name || "Tropical system") + ", "
-                + Model.systemClassificationLabel(system) + ", " + Model.systemMetric(system) : "No current systems")
+                + Model.systemClassificationLabel(system) + ", "
+                + Model.systemMetric(system, root.useImperial) : "No current systems")
             Accessible.role: rowData.kind === "region" ? Accessible.StaticText : Accessible.ListItem
           }
 
@@ -2596,12 +2603,12 @@ Item {
                           rowHeight: root.minimumTouchTarget
                           value: String(root.draftPlaceRadiusKm)
                           options: [
-                            { value: "250", label: "250 km" },
-                            { value: "500", label: "500 km" },
-                            { value: "750", label: "750 km" },
-                            { value: "1000", label: "1,000 km" },
-                            { value: "1500", label: "1,500 km" },
-                            { value: "2000", label: "2,000 km" }
+                            { value: "250", label: Model.formatDistanceKm(250, root.useImperial, 5) },
+                            { value: "500", label: Model.formatDistanceKm(500, root.useImperial, 5) },
+                            { value: "750", label: Model.formatDistanceKm(750, root.useImperial, 5) },
+                            { value: "1000", label: Model.formatDistanceKm(1000, root.useImperial, 5) },
+                            { value: "1500", label: Model.formatDistanceKm(1500, root.useImperial, 5) },
+                            { value: "2000", label: Model.formatDistanceKm(2000, root.useImperial, 5) }
                           ]
                           foreground: root.foreground
                           background: root.deepSurface
