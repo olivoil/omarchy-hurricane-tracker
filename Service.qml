@@ -48,6 +48,25 @@ Item {
   property string watchProcessError: ""
   property string watchProcessOperation: ""
   property string pendingWatchPayload: ""
+  property var placeSearchResults: []
+  property bool placeSearchLoading: false
+  property string placeSearchError: ""
+  property string requestedPlaceSearchQuery: ""
+  property string activePlaceSearchQuery: ""
+  property string pendingPlaceSearchQuery: ""
+  property string placeSearchProcessOutput: ""
+  property string placeSearchProcessError: ""
+  property var reverseGeocodeResult: null
+  property bool reverseGeocodeLoading: false
+  property string reverseGeocodeError: ""
+  property string requestedReverseGeocodeKey: ""
+  property string activeReverseGeocodeKey: ""
+  property var pendingReverseCoordinate: null
+  property double lastReverseGeocodeStartedAt: 0
+  property string reverseGeocodeProcessOutput: ""
+  property string reverseGeocodeProcessError: ""
+  property var reverseGeocodeCache: ({})
+  property var reverseGeocodeCacheKeys: []
 
   readonly property string backendPath: Qt.resolvedUrl("bin/omanado-data").toString().replace(/^file:\/\//, "")
   readonly property string notificationIconPath: Qt.resolvedUrl("assets/hurricane-tracker.svg").toString().replace(/^file:\/\//, "")
@@ -65,6 +84,7 @@ Item {
   readonly property string alertRegion: settingsReady ? String(setting("alertRegion", "Off")) : "Off"
   readonly property string formationThreshold: String(setting("formationThreshold", "Medium (40%)"))
   readonly property bool notifyNamedStorms: setting("notifyNamedStorms", true) === true
+  readonly property bool onlinePlaceSearchEnabled: setting("onlinePlaceSearch", true) === true
   readonly property string alertConfigKey: alertRegion + "|" + formationThreshold + "|" + notifyNamedStorms
   readonly property string placeAlertConfigKey: formationThreshold + "|" + JSON.stringify(watchPlaces)
   readonly property bool alertsEnabled: Model.alertRegionCode(alertRegion) !== ""
@@ -176,6 +196,206 @@ Item {
     if (next.length === watchPlaces.length) return
     watchPlaces = next
     persistWatchPlaces()
+  }
+
+  function normalizedPlaceSearchQuery(value) {
+    return String(value || "").replace(/\s+/g, " ").trim().slice(0, 120)
+  }
+
+  function safePlaceSearchText(value, maximum, required) {
+    if (typeof value !== "string" || value.length > maximum
+        || /[\x00-\x1f\x7f<>]/.test(value)) return null
+    var normalized = value.replace(/\s+/g, " ").trim()
+    return required && normalized === "" ? null : normalized
+  }
+
+  function applyPlaceSearch(raw, expectedQuery) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 64 * 1024) return false
+    var parsed
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      return false
+    }
+    var expected = normalizedPlaceSearchQuery(expectedQuery)
+    if (!parsed || parsed.schemaVersion !== 1
+        || parsed.provider !== "open-meteo-geonames"
+        || normalizedPlaceSearchQuery(parsed.query) !== expected
+        || !Array.isArray(parsed.results) || parsed.results.length > 8) return false
+
+    var normalized = []
+    var identifiers = ({})
+    for (var i = 0; i < parsed.results.length; i++) {
+      var row = parsed.results[i]
+      if (!row || typeof row !== "object") return false
+      var id = safePlaceSearchText(row.id, 80, true)
+      var name = safePlaceSearchText(row.name, 256, true)
+      var context = safePlaceSearchText(row.context, 768, false)
+      var kind = safePlaceSearchText(row.kind, 32, true)
+      var latitude = Number(row.latitude)
+      var longitude = Number(row.longitude)
+      if (id === null || name === null || context === null || kind === null
+          || identifiers[id]
+          || !Number.isFinite(latitude) || !Number.isFinite(longitude)
+          || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180)
+        return false
+      identifiers[id] = true
+      normalized.push({
+        id: id,
+        name: name,
+        context: context,
+        kind: kind,
+        latitude: latitude,
+        longitude: longitude
+      })
+    }
+    placeSearchResults = normalized
+    placeSearchError = ""
+    return true
+  }
+
+  function runPlaceSearch(query) {
+    var normalized = normalizedPlaceSearchQuery(query)
+    if (!onlinePlaceSearchEnabled || normalized.length < 2 || placeSearchProcess.running) return
+    activePlaceSearchQuery = normalized
+    placeSearchProcessOutput = ""
+    placeSearchProcessError = ""
+    placeSearchLoading = requestedPlaceSearchQuery === normalized
+    placeSearchProcess.command = [backendPath, "place-search", normalized]
+    placeSearchProcess.running = true
+  }
+
+  function searchPlaces(value) {
+    var query = normalizedPlaceSearchQuery(value)
+    requestedPlaceSearchQuery = query
+    placeSearchError = ""
+    if (!onlinePlaceSearchEnabled) {
+      pendingPlaceSearchQuery = ""
+      placeSearchResults = []
+      placeSearchLoading = false
+      placeSearchError = "Online place search is off. You can still click the map."
+      return
+    }
+    if (query.length < 2) {
+      pendingPlaceSearchQuery = ""
+      placeSearchResults = []
+      placeSearchLoading = false
+      return
+    }
+    placeSearchLoading = true
+    if (placeSearchProcess.running) {
+      pendingPlaceSearchQuery = activePlaceSearchQuery === query ? "" : query
+      return
+    }
+    runPlaceSearch(query)
+  }
+
+  function clearPlaceSearch() {
+    requestedPlaceSearchQuery = ""
+    pendingPlaceSearchQuery = ""
+    placeSearchResults = []
+    placeSearchLoading = false
+    placeSearchError = ""
+  }
+
+  function reverseCoordinate(latitude, longitude) {
+    var latitudeValue = Number(latitude)
+    var longitudeValue = Number(longitude)
+    if (!Number.isFinite(latitudeValue) || !Number.isFinite(longitudeValue)
+        || latitudeValue < -90 || latitudeValue > 90
+        || longitudeValue < -180 || longitudeValue > 180) return null
+    return {
+      latitude: latitudeValue,
+      longitude: longitudeValue,
+      key: latitudeValue.toFixed(5) + "," + longitudeValue.toFixed(5)
+    }
+  }
+
+  function applyReverseGeocode(raw, expectedKey) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 64 * 1024) return false
+    var parsed
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      return false
+    }
+    var coordinate = reverseCoordinate(parsed && parsed.latitude, parsed && parsed.longitude)
+    var name = parsed ? safePlaceSearchText(parsed.name, 256, true) : null
+    var context = parsed ? safePlaceSearchText(parsed.context, 768, false) : null
+    if (!parsed || parsed.schemaVersion !== 1
+        || parsed.provider !== "nominatim-openstreetmap"
+        || !coordinate || coordinate.key !== expectedKey
+        || name === null || context === null) return false
+    reverseGeocodeResult = {
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      name: name,
+      context: context
+    }
+    var cache = ({})
+    for (var cacheKey in reverseGeocodeCache) cache[cacheKey] = reverseGeocodeCache[cacheKey]
+    var keys = reverseGeocodeCacheKeys.slice()
+    if (!(coordinate.key in cache)) keys.push(coordinate.key)
+    cache[coordinate.key] = reverseGeocodeResult
+    while (keys.length > 32) delete cache[keys.shift()]
+    reverseGeocodeCache = cache
+    reverseGeocodeCacheKeys = keys
+    reverseGeocodeError = ""
+    return true
+  }
+
+  function scheduleReverseGeocode() {
+    if (!pendingReverseCoordinate) return
+    var elapsed = Date.now() - lastReverseGeocodeStartedAt
+    reverseGeocodeDebounce.interval = Math.max(350, 1100 - elapsed)
+    reverseGeocodeDebounce.restart()
+  }
+
+  function runReverseGeocode(coordinate) {
+    if (!coordinate || !onlinePlaceSearchEnabled || reverseGeocodeProcess.running) return
+    activeReverseGeocodeKey = coordinate.key
+    reverseGeocodeProcessOutput = ""
+    reverseGeocodeProcessError = ""
+    reverseGeocodeLoading = requestedReverseGeocodeKey === coordinate.key
+    lastReverseGeocodeStartedAt = Date.now()
+    reverseGeocodeProcess.command = [
+      backendPath,
+      "place-reverse",
+      coordinate.latitude.toFixed(5),
+      coordinate.longitude.toFixed(5)
+    ]
+    reverseGeocodeProcess.running = true
+  }
+
+  function reverseGeocode(latitude, longitude) {
+    var coordinate = reverseCoordinate(latitude, longitude)
+    if (!coordinate) return
+    requestedReverseGeocodeKey = coordinate.key
+    reverseGeocodeError = ""
+    if (coordinate.key in reverseGeocodeCache) {
+      pendingReverseCoordinate = null
+      reverseGeocodeResult = reverseGeocodeCache[coordinate.key]
+      reverseGeocodeLoading = false
+      return
+    }
+    reverseGeocodeResult = null
+    if (!onlinePlaceSearchEnabled) {
+      pendingReverseCoordinate = null
+      reverseGeocodeLoading = false
+      return
+    }
+    pendingReverseCoordinate = coordinate
+    reverseGeocodeLoading = true
+    scheduleReverseGeocode()
+  }
+
+  function clearReverseGeocode() {
+    reverseGeocodeDebounce.stop()
+    requestedReverseGeocodeKey = ""
+    pendingReverseCoordinate = null
+    reverseGeocodeResult = null
+    reverseGeocodeLoading = false
+    reverseGeocodeError = ""
   }
 
   function applyPayload(raw) {
@@ -414,6 +634,86 @@ Item {
     }
   }
 
+  Process {
+    id: placeSearchProcess
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.placeSearchProcessOutput = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.placeSearchProcessError = text
+    }
+    onExited: function(exitCode) {
+      var completedQuery = root.activePlaceSearchQuery
+      var stillRequested = completedQuery !== ""
+        && completedQuery === root.requestedPlaceSearchQuery
+      var accepted = exitCode === 0 && stillRequested
+        && root.applyPlaceSearch(root.placeSearchProcessOutput, completedQuery)
+      if (stillRequested) {
+        root.placeSearchLoading = false
+        if (!accepted) {
+          root.placeSearchResults = []
+          root.placeSearchError = "Place search is unavailable. You can still click the map."
+        }
+      }
+      root.placeSearchProcessOutput = ""
+      root.placeSearchProcessError = ""
+      root.activePlaceSearchQuery = ""
+      var nextQuery = root.pendingPlaceSearchQuery
+      root.pendingPlaceSearchQuery = ""
+      if (nextQuery.length >= 2 && nextQuery === root.requestedPlaceSearchQuery) {
+        root.placeSearchLoading = true
+        Qt.callLater(function() { root.runPlaceSearch(nextQuery) })
+      }
+    }
+  }
+
+  Timer {
+    id: reverseGeocodeDebounce
+    interval: 350
+    repeat: false
+    onTriggered: {
+      var coordinate = root.pendingReverseCoordinate
+      root.pendingReverseCoordinate = null
+      if (coordinate && coordinate.key === root.requestedReverseGeocodeKey) {
+        if (reverseGeocodeProcess.running) root.pendingReverseCoordinate = coordinate
+        else root.runReverseGeocode(coordinate)
+      }
+    }
+  }
+
+  Process {
+    id: reverseGeocodeProcess
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.reverseGeocodeProcessOutput = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.reverseGeocodeProcessError = text
+    }
+    onExited: function(exitCode) {
+      var completedKey = root.activeReverseGeocodeKey
+      var stillRequested = completedKey !== ""
+        && completedKey === root.requestedReverseGeocodeKey
+      var accepted = exitCode === 0 && stillRequested
+        && root.applyReverseGeocode(root.reverseGeocodeProcessOutput, completedKey)
+      if (stillRequested) {
+        root.reverseGeocodeLoading = false
+        if (!accepted) root.reverseGeocodeError = "Nearby place naming is unavailable."
+      }
+      root.reverseGeocodeProcessOutput = ""
+      root.reverseGeocodeProcessError = ""
+      root.activeReverseGeocodeKey = ""
+      if (root.pendingReverseCoordinate
+          && root.pendingReverseCoordinate.key === root.requestedReverseGeocodeKey)
+        root.scheduleReverseGeocode()
+    }
+  }
+
   Timer {
     id: refreshTimer
     interval: root.refreshMinutes * 60 * 1000 * root.retryMultiplier
@@ -428,5 +728,11 @@ Item {
     armAlertsQuietly()
   }
   onPlaceAlertConfigKeyChanged: armPlaceAlertsQuietly()
+  onOnlinePlaceSearchEnabledChanged: {
+    if (!onlinePlaceSearchEnabled) {
+      clearPlaceSearch()
+      clearReverseGeocode()
+    }
+  }
   Component.onCompleted: loadWatchPlaces()
 }

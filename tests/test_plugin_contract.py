@@ -23,6 +23,7 @@ class PluginContractTests(unittest.TestCase):
             self.assertTrue((ROOT / entry_point).is_file(), entry_point)
         defaults = manifest["barWidget"]["defaults"]
         self.assertEqual(defaults["alertRegion"], "Off")
+        self.assertTrue(defaults["onlinePlaceSearch"])
         self.assertEqual(defaults["formationThreshold"], "Medium (40%)")
         self.assertTrue(defaults["notifyNamedStorms"])
         self.assertTrue((ROOT / "assets" / "hurricane-tracker.svg").is_file())
@@ -87,6 +88,90 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("readonly property int typeCaption", overlay)
         self.assertIn("readonly property int minimumTouchTarget", overlay)
         self.assertNotRegex(overlay, r"Math\.max\([678], Style\.font\.caption -")
+
+    def test_place_editor_supports_search_and_direct_map_placement(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        self.assertIn('text: "NAME"', overlay)
+        self.assertIn('text: "LOCATION"', overlay)
+        self.assertIn('text: "ALERTS"', overlay)
+        editor_form = overlay.split('id: editorForm', 1)[1].split(
+            'id: editorActions', 1
+        )[0]
+        self.assertLess(
+            editor_form.index('id: placeLocationSection'),
+            editor_form.index('id: placeNameSection'),
+        )
+        self.assertLess(
+            editor_form.index('id: placeNameSection'),
+            editor_form.index('text: "ALERTS"'),
+        )
+        self.assertNotIn('text: "FIND ON MAP"', overlay)
+        self.assertNotIn('text: "MAP POSITION"', overlay)
+        self.assertNotIn('text: "PROACTIVE ALERT RULES"', overlay)
+        self.assertIn('id: placeSearchField', overlay)
+        self.assertIn('id: locationPicker', overlay)
+        self.assertIn('"Search a place or click the map"', overlay)
+        self.assertIn('placeholderText: "Home, Beach House, Mom’s Place"', overlay)
+        self.assertIn('z: 50', overlay)
+        self.assertIn('visible: root.placeSearchMenuOpen', overlay)
+        self.assertIn('if (draftLocationPending)', overlay)
+        search_surface = overlay.split('id: placeSearchResultsSurface', 1)[1].split(
+            'Column {', 1
+        )[0]
+        self.assertIn('parent: watchPlaceEditor', search_surface)
+        self.assertNotIn('placeSearchField.mapToItem(', search_surface)
+        self.assertIn('editorForm.x + placeLocationSection.x', search_surface)
+        self.assertIn('editorForm.y + placeLocationSection.y', search_surface)
+        self.assertIn('locationPicker.height', search_surface)
+        self.assertIn('editorScroll.contentY', search_surface)
+        self.assertIn('Place search: Open-Meteo · GeoNames', overlay)
+        self.assertNotIn(
+            'Place names: Open-Meteo · GeoNames · © OpenStreetMap contributors',
+            overlay,
+        )
+        self.assertIn('© OpenStreetMap contributors', overlay)
+        self.assertIn('function selectPlaceSearchResult(result)', overlay)
+        self.assertIn('stormMap.fitWatchPlace(root.draftWatchPlace)', overlay)
+        self.assertIn('function setDraftWatchCoordinate(latitude, longitude, fromSearch)', overlay)
+        self.assertIn('signal placePicked(real latitude, real longitude)', storm_map)
+        self.assertIn('root.placePicked(coordinate.latitude, coordinate.longitude)', storm_map)
+        self.assertIn('id: placeSearchProcess', service)
+        self.assertIn('readonly property bool onlinePlaceSearchEnabled', service)
+        self.assertIn('if (!onlinePlaceSearchEnabled)', service)
+        self.assertIn('[backendPath, "place-search", normalized]', service)
+        self.assertIn('completedQuery === root.requestedPlaceSearchQuery', service)
+        self.assertIn('id: reverseGeocodeProcess', service)
+        self.assertIn('"place-reverse"', service)
+        self.assertNotIn('geocoding-api.open-meteo.com', overlay)
+        self.assertNotIn('geocoding-api.open-meteo.com', service)
+
+    def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        self.assertIn('property bool draftPlaceNameManuallyEdited: false', overlay)
+        self.assertIn('function suggestDraftPlaceName(value)', overlay)
+        self.assertIn('root.suggestDraftPlaceName(result.name)', overlay)
+        self.assertIn('root.tracker.reverseGeocode(latitude, longitude)', overlay)
+        suggestion = overlay.split('function suggestDraftPlaceName(value)', 1)[1].split(
+            'function queuePlaceSearch', 1
+        )[0]
+        self.assertIn('draftPlaceName = suggestion', suggestion)
+        self.assertIn('onDraftPlaceNameChanged:', overlay)
+        name_sync = overlay.split('onDraftPlaceNameChanged:', 1)[1].split(
+            'readonly property string pluginId', 1
+        )[0]
+        self.assertIn('placeNameField.text = root.draftPlaceName', name_sync)
+        self.assertIn('function applyReverseGeocodeSuggestion(result)', overlay)
+        reverse_connection = overlay.split(
+            'function onReverseGeocodeResultChanged()', 1
+        )[1].split('function onOnlinePlaceSearchEnabledChanged()', 1)[0]
+        self.assertIn('Qt.callLater', reverse_connection)
+        self.assertIn(
+            'root.applyReverseGeocodeSuggestion(root.tracker.reverseGeocodeResult)',
+            reverse_connection,
+        )
+        self.assertNotIn('name: draftPlaceName.trim() || "New watch place"', overlay)
 
     def test_plugin_id_is_injected_for_parallel_preview_installs(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")

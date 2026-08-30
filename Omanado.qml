@@ -25,8 +25,20 @@ Item {
   property real draftPlaceLongitude: 999
   property int draftPlaceRadiusKm: 1000
   property string placeEditorError: ""
+  property bool draftPlaceNameManuallyEdited: false
+  property string draftPlaceSearchQuery: ""
+  property string draftResolvedPlaceLabel: ""
+  property string draftPlaceLookupProvider: ""
+  property bool draftLocationPending: false
+  property bool placeSearchMenuOpen: false
+  property int placeSearchHighlightIndex: -1
   property string pendingRemovePlaceId: ""
   property int clockTick: 0
+
+  onDraftPlaceNameChanged: {
+    if (placeNameField.text !== root.draftPlaceName)
+      placeNameField.text = root.draftPlaceName
+  }
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.olivoil.hurricane-tracker"
@@ -34,6 +46,24 @@ Item {
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
   readonly property var outlooks: tracker && Array.isArray(tracker.outlooks) ? tracker.outlooks : []
   readonly property var watchPlaces: tracker && Array.isArray(tracker.watchPlaces) ? tracker.watchPlaces : []
+  readonly property var placeSearchResults: tracker && Array.isArray(tracker.placeSearchResults)
+    ? tracker.placeSearchResults : []
+  readonly property bool placeSearchLoading: tracker && tracker.placeSearchLoading === true
+  readonly property bool onlinePlaceSearchEnabled: !tracker
+    || tracker.onlinePlaceSearchEnabled !== false
+  readonly property string placeSearchError: tracker
+    ? String(tracker.placeSearchError || "") : ""
+  readonly property bool reverseGeocodeLoading: tracker
+    && tracker.reverseGeocodeLoading === true
+  readonly property string reverseGeocodeError: tracker
+    ? String(tracker.reverseGeocodeError || "") : ""
+  readonly property bool locationLookupLoading: placeSearchLoading || reverseGeocodeLoading
+  readonly property int visiblePlaceSearchResultCount: Math.min(6, placeSearchResults.length)
+  readonly property bool placeSearchSettledEmpty: tracker
+    && !placeSearchDebounce.running && !placeSearchLoading && placeSearchError === ""
+    && draftPlaceSearchQuery.trim().length >= 2 && placeSearchResults.length === 0
+    && String(tracker.requestedPlaceSearchQuery || "")
+      === draftPlaceSearchQuery.replace(/\s+/g, " ").trim()
   readonly property var systems: Model.orderedSystems(storms, outlooks)
   readonly property var regionalRows: Model.regionalRows(storms, outlooks)
   readonly property var watchPlaceSummaries: Model.watchPlaceSummaries(
@@ -77,7 +107,9 @@ Item {
   readonly property var draftWatchPlace: editingWatchPlace
     && Model.validCoordinate(draftPlaceLatitude, draftPlaceLongitude) ? ({
       id: editingPlaceId || "draft",
-      name: draftPlaceName.trim() || "New watch place",
+      name: draftPlaceName.trim() || (draftResolvedPlaceLabel
+        ? draftResolvedPlaceLabel.split(",", 1)[0]
+        : coordinateLabel(draftPlaceLatitude, draftPlaceLongitude, 2)),
       latitude: draftPlaceLatitude,
       longitude: draftPlaceLongitude,
       radiusKm: draftPlaceRadiusKm
@@ -349,7 +381,9 @@ Item {
     draftPlaceLongitude = 999
     draftPlaceRadiusKm = 1000
     placeEditorError = ""
-    Qt.callLater(function() { placeNameField.forceActiveFocus() })
+    draftPlaceNameManuallyEdited = false
+    resetPlaceSearch()
+    Qt.callLater(function() { placeSearchField.forceActiveFocus() })
   }
 
   function beginEditWatchPlace(identifier) {
@@ -364,6 +398,9 @@ Item {
     draftPlaceLongitude = Number(place.longitude)
     draftPlaceRadiusKm = Number(place.radiusKm)
     placeEditorError = ""
+    draftPlaceNameManuallyEdited = true
+    resetPlaceSearch()
+    draftPlaceSearchQuery = coordinateLabel(place.latitude, place.longitude, 3)
     selectedPlaceId = place.id
     stormMap.fitWatchPlace(place)
     Qt.callLater(function() {
@@ -379,13 +416,118 @@ Item {
     draftPlaceLatitude = 999
     draftPlaceLongitude = 999
     placeEditorError = ""
+    draftPlaceNameManuallyEdited = false
+    resetPlaceSearch()
     keyCatcher.forceActiveFocus()
   }
 
-  function setDraftWatchCoordinate(latitude, longitude) {
+  function resetPlaceSearch() {
+    placeSearchDebounce.stop()
+    draftPlaceSearchQuery = ""
+    draftResolvedPlaceLabel = ""
+    draftPlaceLookupProvider = ""
+    draftLocationPending = false
+    placeSearchMenuOpen = false
+    placeSearchHighlightIndex = -1
+    if (tracker && tracker.clearPlaceSearch) tracker.clearPlaceSearch()
+    if (tracker && tracker.clearReverseGeocode) tracker.clearReverseGeocode()
+  }
+
+  function suggestDraftPlaceName(value) {
+    var suggestion = String(value || "").replace(/\s+/g, " ").trim().slice(0, 40)
+    if (!suggestion) return
+    if (!draftPlaceNameManuallyEdited || draftPlaceName.trim() === "") {
+      draftPlaceName = suggestion
+      draftPlaceNameManuallyEdited = false
+    }
+  }
+
+  function queuePlaceSearch(value) {
+    draftPlaceSearchQuery = String(value || "").slice(0, 120)
+    draftResolvedPlaceLabel = ""
+    draftPlaceLookupProvider = ""
+    draftLocationPending = true
+    placeSearchMenuOpen = onlinePlaceSearchEnabled
+      && draftPlaceSearchQuery.trim().length >= 2
+    placeSearchHighlightIndex = -1
+    if (tracker && tracker.clearPlaceSearch) tracker.clearPlaceSearch()
+    if (tracker && tracker.clearReverseGeocode) tracker.clearReverseGeocode()
+    if (!tracker || !tracker.searchPlaces || draftPlaceSearchQuery.trim().length < 2) {
+      placeSearchDebounce.stop()
+      return
+    }
+    placeSearchDebounce.restart()
+  }
+
+  function movePlaceSearchHighlight(delta) {
+    var count = visiblePlaceSearchResultCount
+    if (count === 0) return
+    var current = placeSearchHighlightIndex
+    if (current < 0) current = delta > 0 ? -1 : 0
+    placeSearchHighlightIndex = (current + delta + count) % count
+  }
+
+  function selectPlaceSearchResult(result) {
+    if (!result || !Model.validCoordinate(result.latitude, result.longitude)) return
+    var label = String(result.name || "")
+    var context = String(result.context || "")
+    draftResolvedPlaceLabel = label + (context ? ", " + context : "")
+    draftPlaceLookupProvider = "open-meteo-geonames"
+    draftPlaceSearchQuery = draftResolvedPlaceLabel
+    draftLocationPending = false
+    placeSearchMenuOpen = false
+    placeSearchDebounce.stop()
+    placeSearchHighlightIndex = -1
+    if (tracker && tracker.clearPlaceSearch) tracker.clearPlaceSearch()
+    if (tracker && tracker.clearReverseGeocode) tracker.clearReverseGeocode()
+    root.suggestDraftPlaceName(result.name)
+    setDraftWatchCoordinate(result.latitude, result.longitude, true)
+    Qt.callLater(function() {
+      if (root.draftWatchPlace) stormMap.fitWatchPlace(root.draftWatchPlace)
+      placeNameField.forceActiveFocus()
+      placeNameField.selectAll()
+    })
+  }
+
+  function selectHighlightedPlaceSearchResult() {
+    var index = placeSearchHighlightIndex
+    if (index < 0 && visiblePlaceSearchResultCount > 0) index = 0
+    if (index >= 0 && index < visiblePlaceSearchResultCount)
+      selectPlaceSearchResult(placeSearchResults[index])
+  }
+
+  function setDraftWatchCoordinate(latitude, longitude, fromSearch) {
     if (!editingWatchPlace || !Model.validCoordinate(latitude, longitude)) return
     draftPlaceLatitude = Number(latitude)
     draftPlaceLongitude = Number(longitude)
+    placeEditorError = ""
+    if (fromSearch !== true) {
+      placeSearchDebounce.stop()
+      draftPlaceSearchQuery = coordinateLabel(latitude, longitude, 3)
+      draftResolvedPlaceLabel = ""
+      draftPlaceLookupProvider = ""
+      draftLocationPending = false
+      placeSearchMenuOpen = false
+      placeSearchHighlightIndex = -1
+      if (tracker && tracker.clearPlaceSearch) tracker.clearPlaceSearch()
+      if (tracker && tracker.clearReverseGeocode) tracker.clearReverseGeocode()
+      if (tracker && tracker.reverseGeocode)
+        root.tracker.reverseGeocode(latitude, longitude)
+    }
+  }
+
+  function applyReverseGeocodeSuggestion(result) {
+    if (!editingWatchPlace || !result
+        || !Model.validCoordinate(result.latitude, result.longitude)
+        || Math.abs(Number(result.latitude) - draftPlaceLatitude) > 0.00001
+        || Math.abs(Number(result.longitude) - draftPlaceLongitude) > 0.00001) return
+    var name = String(result.name || "").replace(/\s+/g, " ").trim()
+    var context = String(result.context || "").replace(/\s+/g, " ").trim()
+    if (!name) return
+    draftResolvedPlaceLabel = name + (context ? ", " + context : "")
+    draftPlaceLookupProvider = "nominatim-openstreetmap"
+    draftPlaceSearchQuery = draftResolvedPlaceLabel
+    suggestDraftPlaceName(name)
     placeEditorError = ""
   }
 
@@ -399,10 +541,27 @@ Item {
     return latitude + ", " + longitude
   }
 
-  function draftCoordinateLabel() {
-    if (!Model.validCoordinate(draftPlaceLatitude, draftPlaceLongitude))
-      return "CLICK THE MAP TO SET A LOCATION"
-    return coordinateLabel(draftPlaceLatitude, draftPlaceLongitude, 3)
+  function locationHint() {
+    if (placeSearchError !== "") return placeSearchError
+    if (placeSearchLoading) return "Searching… You can still click the globe."
+    if (reverseGeocodeLoading) return "Finding the nearest place name…"
+    if (draftLocationPending) {
+      if (placeSearchSettledEmpty)
+        return "No matching places. Try adding a region or country."
+      return draftPlaceSearchQuery.trim().length < 2
+        ? "Keep typing, or click the globe to choose the location."
+        : "Choose a result, or click the globe to use an exact point."
+    }
+    if (Model.validCoordinate(draftPlaceLatitude, draftPlaceLongitude)) {
+      var coordinate = coordinateLabel(draftPlaceLatitude, draftPlaceLongitude, 3)
+      if (reverseGeocodeError !== "") return coordinate + " · Add a name below."
+      if (draftPlaceLookupProvider === "nominatim-openstreetmap")
+        return coordinate + " · © OpenStreetMap contributors"
+      return coordinate
+    }
+    return onlinePlaceSearchEnabled
+      ? "Search for a place, or click the globe to choose an exact point."
+      : "Click the globe to choose an exact point."
   }
 
   function watchPlaceCoordinateLabel(place) {
@@ -427,9 +586,14 @@ Item {
       placeNameField.forceActiveFocus()
       return
     }
+    if (draftLocationPending) {
+      placeEditorError = "Choose a location result or click the map."
+      placeSearchField.forceActiveFocus()
+      return
+    }
     if (!Model.validCoordinate(draftPlaceLatitude, draftPlaceLongitude)) {
-      placeEditorError = "Click the map to choose the location you want to watch."
-      keyCatcher.forceActiveFocus()
+      placeEditorError = "Search for a location or click the map."
+      placeSearchField.forceActiveFocus()
       return
     }
     if (!tracker || !tracker.upsertWatchPlace) {
@@ -516,6 +680,20 @@ Item {
       if (root.selectedPlaceId && !root.watchPlaceById(root.selectedPlaceId))
         root.selectedPlaceId = ""
     }
+    function onReverseGeocodeResultChanged() {
+      Qt.callLater(function() {
+        if (root.tracker)
+          root.applyReverseGeocodeSuggestion(root.tracker.reverseGeocodeResult)
+      })
+    }
+    function onOnlinePlaceSearchEnabledChanged() {
+      if (!root.onlinePlaceSearchEnabled) {
+        root.resetPlaceSearch()
+        if (Model.validCoordinate(root.draftPlaceLatitude, root.draftPlaceLongitude))
+          root.draftPlaceSearchQuery = root.coordinateLabel(
+            root.draftPlaceLatitude, root.draftPlaceLongitude, 3)
+      }
+    }
   }
 
   Connections {
@@ -535,6 +713,17 @@ Item {
     interval: 5000
     repeat: false
     onTriggered: root.pendingRemovePlaceId = ""
+  }
+
+  Timer {
+    id: placeSearchDebounce
+    interval: 450
+    repeat: false
+    onTriggered: {
+      if (root.tracker && root.tracker.searchPlaces
+          && root.draftPlaceSearchQuery.trim().length >= 2)
+        root.tracker.searchPlaces(root.draftPlaceSearchQuery)
+    }
   }
 
   PanelWindow {
@@ -1997,14 +2186,295 @@ Item {
                 spacing: Style.space(13)
 
               Column {
+                id: placeLocationSection
+                z: 20
                 width: parent.width
                 spacing: Style.space(6)
 
                 Text {
-                  text: "LOCATION NAME"
+                  text: "LOCATION"
                   color: root.dim
                   font.family: Style.font.menuFamily
-                  font.pixelSize: root.typeMicro
+                  font.pixelSize: root.typeCaption
+                  font.bold: true
+                  font.letterSpacing: 0.55
+                }
+
+                Item {
+                  id: locationPicker
+                  width: parent.width
+                  height: root.minimumTouchTarget
+
+                  TextField {
+                    id: placeSearchField
+                    anchors.fill: parent
+                    readOnly: !root.onlinePlaceSearchEnabled
+                    text: root.draftPlaceSearchQuery
+                    placeholderText: root.onlinePlaceSearchEnabled
+                      ? "Search a place or click the map" : "Click the map to choose a location"
+                    maximumLength: 120
+                    rightPadding: Style.space(38)
+                    foreground: root.foreground
+                    accent: root.accent
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: root.typeBody
+                    onTextEdited: root.queuePlaceSearch(text)
+                    onActiveFocusChanged: {
+                      if (activeFocus) {
+                        if (!root.draftLocationPending && text !== "") selectAll()
+                        if (root.draftLocationPending && text.trim().length >= 2) {
+                          root.placeSearchMenuOpen = true
+                          if (root.placeSearchResults.length === 0
+                              && !root.placeSearchLoading) placeSearchDebounce.restart()
+                        }
+                      } else {
+                        Qt.callLater(function() {
+                          if (!placeSearchField.activeFocus) root.placeSearchMenuOpen = false
+                        })
+                      }
+                    }
+                    Keys.onPressed: function(event) {
+                      if (event.key === Qt.Key_Escape) {
+                        if (root.placeSearchMenuOpen) {
+                          root.placeSearchMenuOpen = false
+                          if (root.tracker && root.tracker.clearPlaceSearch)
+                            root.tracker.clearPlaceSearch()
+                        } else {
+                          root.cancelWatchPlaceEditor()
+                        }
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Down) {
+                        root.placeSearchMenuOpen = true
+                        root.movePlaceSearchHighlight(1)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Up) {
+                        root.placeSearchMenuOpen = true
+                        root.movePlaceSearchHighlight(-1)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        if (root.placeSearchMenuOpen
+                            && root.visiblePlaceSearchResultCount > 0) {
+                          root.selectHighlightedPlaceSearchResult()
+                        } else if (root.draftLocationPending
+                            && root.draftPlaceSearchQuery.trim().length >= 2
+                            && root.tracker && root.tracker.searchPlaces) {
+                          root.placeSearchMenuOpen = true
+                          placeSearchDebounce.stop()
+                          root.tracker.searchPlaces(root.draftPlaceSearchQuery)
+                        }
+                        event.accepted = true
+                      }
+                    }
+                    Accessible.name: "Location, searchable or selectable on the map"
+                  }
+
+                  Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(11)
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !root.locationLookupLoading
+                    text: root.draftWatchPlace && !root.draftLocationPending
+                      ? "\uf041" : "\uf002"
+                    color: root.draftWatchPlace && !root.draftLocationPending
+                      ? root.accent : root.dim
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.icon
+                  }
+
+                  Text {
+                    id: placeSearchSpinner
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(11)
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.locationLookupLoading
+                    text: "\uf110"
+                    color: root.accent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.icon
+                    transformOrigin: Item.Center
+
+                    RotationAnimator on rotation {
+                      running: root.locationLookupLoading
+                      from: 0
+                      to: 360
+                      duration: 900
+                      loops: Animation.Infinite
+                    }
+                  }
+
+                  BorderSurface {
+                    id: placeSearchResultsSurface
+                    parent: watchPlaceEditor
+                    x: editorScroll.x + editorForm.x + placeLocationSection.x
+                      + locationPicker.x - editorScroll.contentX
+                    y: editorScroll.y + editorForm.y + placeLocationSection.y
+                      + locationPicker.y + locationPicker.height
+                      - editorScroll.contentY + Style.space(6)
+                    z: 50
+                    visible: root.placeSearchMenuOpen
+                      && root.visiblePlaceSearchResultCount > 0
+                    width: placeSearchField.width
+                    height: visible ? searchResultsColumn.implicitHeight : 0
+                    radius: Style.space(7)
+                    color: root.deepSurface
+                    borderSpec: Border.surfaceSpec("menu", "border", root.border,
+                      Math.max(1, Style.normalBorderWidth))
+                    clip: true
+
+                    Column {
+                      id: searchResultsColumn
+                      width: parent.width
+
+                      Repeater {
+                        model: root.placeSearchResults.slice(0,
+                          root.visiblePlaceSearchResultCount)
+
+                        delegate: Rectangle {
+                          id: searchResultRow
+                          required property var modelData
+                          required property int index
+                          width: searchResultsColumn.width
+                          height: Style.space(52)
+                          color: root.placeSearchHighlightIndex === index
+                            ? Style.selectedFillFor(root.foreground, root.accent)
+                            : (searchResultMouse.containsMouse
+                              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+
+                          Behavior on color { ColorAnimation { duration: 90 } }
+
+                          Rectangle {
+                            visible: searchResultRow.index > 0
+                            anchors.left: parent.left
+                            anchors.leftMargin: Style.space(10)
+                            anchors.right: parent.right
+                            anchors.rightMargin: Style.space(10)
+                            anchors.top: parent.top
+                            height: 1
+                            color: root.softBorder
+                          }
+
+                          Column {
+                            anchors.left: parent.left
+                            anchors.leftMargin: Style.space(10)
+                            anchors.right: searchResultKind.left
+                            anchors.rightMargin: Style.space(10)
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Style.space(3)
+
+                            Text {
+                              width: parent.width
+                              text: String(searchResultRow.modelData.name || "Place")
+                              textFormat: Text.PlainText
+                              color: root.foreground
+                              elide: Text.ElideRight
+                              font.family: Style.font.menuFamily
+                              font.pixelSize: root.typeBody
+                              font.bold: true
+                            }
+                            Text {
+                              width: parent.width
+                              text: String(searchResultRow.modelData.context || "")
+                              textFormat: Text.PlainText
+                              color: root.dim
+                              elide: Text.ElideRight
+                              font.family: Style.font.menuFamily
+                              font.pixelSize: root.typeCaption
+                            }
+                          }
+
+                          Text {
+                            id: searchResultKind
+                            anchors.right: parent.right
+                            anchors.rightMargin: Style.space(10)
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: String(searchResultRow.modelData.kind || "Place").toUpperCase()
+                            textFormat: Text.PlainText
+                            color: root.faint
+                            font.family: Style.font.menuFamily
+                            font.pixelSize: root.typeMicro
+                            font.bold: true
+                            font.letterSpacing: 0.35
+                          }
+
+                          MouseArea {
+                            id: searchResultMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            preventStealing: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: root.placeSearchHighlightIndex = searchResultRow.index
+                            onClicked: root.selectPlaceSearchResult(searchResultRow.modelData)
+                          }
+
+                          Accessible.name: String(modelData.name || "Place") + ", "
+                            + String(modelData.context || "")
+                          Accessible.role: Accessible.ListItem
+                        }
+                      }
+
+                      Item {
+                        width: parent.width
+                        height: Style.space(27)
+
+                        Rectangle {
+                          anchors.left: parent.left
+                          anchors.leftMargin: Style.space(10)
+                          anchors.right: parent.right
+                          anchors.rightMargin: Style.space(10)
+                          anchors.top: parent.top
+                          height: 1
+                          color: root.softBorder
+                        }
+                        Text {
+                          anchors.left: parent.left
+                          anchors.leftMargin: Style.space(10)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "Place search: Open-Meteo · GeoNames"
+                          textFormat: Text.PlainText
+                          color: root.faint
+                          font.family: Style.font.menuFamily
+                          font.pixelSize: root.typeMicro
+                        }
+                      }
+                    }
+                  }
+                }
+
+                Text {
+                  width: parent.width
+                  text: root.locationHint()
+                  textFormat: Text.PlainText
+                  wrapMode: Text.WordWrap
+                  color: root.placeSearchError !== "" || root.reverseGeocodeError !== ""
+                    ? "#e9be62" : root.dim
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: root.typeCaption
+                  lineHeight: 1.4
+                }
+                Text {
+                  visible: root.draftWatchPlace
+                    && !Model.watchPlaceCoverage(root.draftWatchPlace).supported
+                  width: parent.width
+                  text: "Outside current NHC source coverage. This location can stay saved, but reliable alerts need another official source."
+                  textFormat: Text.PlainText
+                  wrapMode: Text.WordWrap
+                  color: "#e9be62"
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: root.typeCaption
+                  lineHeight: 1.4
+                }
+              }
+
+              Column {
+                id: placeNameSection
+                width: parent.width
+                spacing: Style.space(6)
+
+                Text {
+                  text: "NAME"
+                  color: root.dim
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: root.typeCaption
                   font.bold: true
                   font.letterSpacing: 0.55
                 }
@@ -2019,7 +2489,10 @@ Item {
                   accent: root.accent
                   font.family: Style.font.menuFamily
                   font.pixelSize: root.typeBody
-                  onTextEdited: root.draftPlaceName = text
+                  onTextEdited: {
+                    root.draftPlaceName = text
+                    root.draftPlaceNameManuallyEdited = true
+                  }
                   Keys.onPressed: function(event) {
                     if (event.key === Qt.Key_Escape) {
                       root.cancelWatchPlaceEditor()
@@ -2029,78 +2502,7 @@ Item {
                       event.accepted = true
                     }
                   }
-                }
-              }
-
-              Column {
-                width: parent.width
-                spacing: Style.space(6)
-
-                Text {
-                  text: "MAP POSITION"
-                  color: root.dim
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: root.typeMicro
-                  font.bold: true
-                  font.letterSpacing: 0.55
-                }
-                BorderSurface {
-                  width: parent.width
-                  height: root.minimumTouchTarget
-                  radius: Style.space(7)
-                  color: root.deepSurface
-                  borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-                  Row {
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(10)
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(7)
-
-                    Text {
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "\uf041"
-                      color: root.draftWatchPlace ? root.accent : root.dim
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.icon
-                    }
-                    Text {
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: parent.width - Style.space(31)
-                      text: root.draftCoordinateLabel()
-                      color: root.draftWatchPlace ? root.foreground : root.dim
-                      font.family: Style.font.menuFamily
-                      font.pixelSize: root.typeCaption
-                      font.bold: root.draftWatchPlace !== null
-                      elide: Text.ElideRight
-                    }
-                  }
-                }
-                Text {
-                  width: parent.width
-                  text: root.draftWatchPlace
-                    ? "Drag the watch point on the globe to adjust it. Alert areas are shown only while editing."
-                    : "Click the globe to place the watch point. Alert areas are shown only while editing."
-                  textFormat: Text.PlainText
-                  wrapMode: Text.WordWrap
-                  color: root.dim
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: root.typeCaption
-                  lineHeight: 1.45
-                }
-                Text {
-                  visible: root.draftWatchPlace
-                    && !Model.watchPlaceCoverage(root.draftWatchPlace).supported
-                  width: parent.width
-                  text: "This point is outside current NHC source coverage. It will stay saved, but reliable alerts need another official data source."
-                  textFormat: Text.PlainText
-                  wrapMode: Text.WordWrap
-                  color: "#e9be62"
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: root.typeCaption
-                  lineHeight: 1.4
+                  Accessible.name: "Personal name for this watched location"
                 }
               }
 
@@ -2109,7 +2511,7 @@ Item {
                 spacing: Style.space(8)
 
                 Text {
-                  text: "PROACTIVE ALERT RULES"
+                  text: "ALERTS"
                   color: root.dim
                   font.family: Style.font.menuFamily
                   font.pixelSize: root.typeCaption

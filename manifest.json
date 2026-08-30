@@ -34,6 +34,7 @@
     "defaultSection": "center",
     "defaults": {
       "refreshMinutes": 15,
+      "onlinePlaceSearch": true,
       "alertRegion": "Off",
       "formationThreshold": "Medium (40%)",
       "notifyNamedStorms": true
@@ -48,6 +49,13 @@
         "step": 5,
         "defaultValue": 15,
         "description": "How often Hurricane Tracker checks the National Hurricane Center for updates."
+      },
+      {
+        "key": "onlinePlaceSearch",
+        "type": "boolean",
+        "label": "Online place lookup",
+        "defaultValue": true,
+        "description": "Allow typed place searches through Open-Meteo and nearby-place naming for map clicks through OpenStreetMap. Turn this off to keep map placement local."
       },
       {
         "key": "alertRegion",

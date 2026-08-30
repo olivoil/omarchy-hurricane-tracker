@@ -3,9 +3,10 @@
 Hurricane Tracker is one Omarchy plugin with three shell kinds:
 
 ```text
-BarWidget.qml ─┐
-               ├─ Service.qml ─ Process ─ bin/omanado-data ─ NOAA/NHC
-Omanado.qml ───┘                         └─ user cache
+BarWidget.qml ─┐                                      ┌─ NOAA/NHC
+               ├─ Service.qml ─ Process ─ omanado-data├─ Open-Meteo search
+               │                                  └─ Nominatim reverse lookup
+Omanado.qml ───┘                                      └─ user cache/config
      └─ StormMap.qml + Model.js + Natural Earth geometry
 ```
 
@@ -23,6 +24,14 @@ Watch places are a versioned local configuration, not part of the public NHC
 payload. The helper validates at most 12 named coordinates with bounded radii
 and atomically writes them with user-only permissions under the XDG config
 directory. Saving coordinates never makes a network request.
+
+Typed geographic searches use a separate short-lived process and never share
+the cyclone refresh process. QML debounces input, keeps only the newest queued
+query, and discards a completed response when its query is no longer current.
+The optional setting can disable online search without disabling direct map
+placement. Geographic results and reverse lookup suggest an initial place name,
+which stays separately editable as the user's personal label. The edited label
+is never sent to either provider.
 
 `BarWidget.qml` stays deliberately small. It shows whether any systems are
 active, forwards settings to the shared service, and opens the overlay through
@@ -42,6 +51,10 @@ the shell's normal plugin IPC route.
 5. Normalizes the source documents into a versioned JSON contract.
 6. Atomically writes a private cache and marks fallback data as stale.
 7. Validates and privately persists the separate watch-place configuration.
+8. Sends bounded typed lookups only to Open-Meteo's fixed HTTPS search endpoint
+   and user-selected coordinates only to Nominatim's fixed HTTPS reverse
+   endpoint. Both refuse redirects; typed search normalizes at most eight safe
+   results, while stale reverse results are discarded before reaching the UI.
 
 Remote text is normalized before it reaches QML. Browser actions are checked
 again against the NHC hostname allowlist in `Model.js` before launch.

@@ -19,6 +19,7 @@ does not currently include storms tracked by the JTWC or other agencies.
 - Excerpts from the latest NHC discussions, with links to the full advisories
 - Optional notifications for new cyclones and rising formation chances
 - A global Alerts destination for locally saved locations and proximity notifications
+- Typed city, region, and postal-code search while positioning an alert destination
 - Keyboard navigation, map controls, and support for reduced motion
 - Cached data when the NHC is temporarily unavailable
 
@@ -36,7 +37,9 @@ omarchy plugin add https://github.com/olivoil/omarchy-hurricane-tracker.git --en
 ```
 
 It also needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` to download
-advisories and outlooks.
+advisories and outlooks. Typed place search uses
+`geocoding-api.open-meteo.com`; map placement still works when online place
+search is disabled.
 
 ## Settings and notifications
 
@@ -53,10 +56,13 @@ When you turn them on, existing systems are treated as the starting point, so
 you will not get a burst of notifications for storms already underway.
 
 Open **Alerts** in the app header to save up to 12 locations such as home,
-family, or a destination. Give each location a 250 km, 500 km, or 1,000 km
-watch radius, then click its position on the globe. The map keeps saved
-locations quiet as dots and reveals their alert areas while editing. Location
-notifications are sent when:
+family, or a destination. Search for a city, region, or postal code, or click
+its position directly on the globe. Give each location a watch radius from 250
+km to 2,000 km. A search result or nearby map place supplies the initial name,
+then the separate **Name** field lets you personalize it, so Sarasota can still
+be saved as “Mom’s Place.” The map keeps saved locations quiet as dots and
+reveals their alert areas while editing.
+Location notifications are sent when:
 
 - an NHC formation area within that radius reaches your formation threshold; or
 - an official NHC forecast cone or center track enters the radius.
@@ -71,6 +77,13 @@ Watch places are stored locally in
 file is written with user-only permissions. Current source coverage is limited
 to NHC basins; a place elsewhere remains saved but is marked as outside the
 current source coverage.
+
+Online place lookup waits until typing pauses, then sends only the geographic
+search text to Open-Meteo. Choosing a point on the globe sends that coordinate
+to OpenStreetMap's Nominatim service once to suggest a nearby place name.
+Personal labels, saved watch-place lists, and alert radii are never included.
+Turn off **Online place lookup** in the plugin settings to keep globe placement
+entirely local; coordinate labels remain available as a fallback.
 
 ## Controls
 
@@ -104,8 +117,21 @@ preliminary best tracks. Formation areas and probabilities come from the NHC's
 Graphical Tropical Weather Outlook products. It also fetches the linked text
 products for forecast discussion excerpts.
 
-Network requests are limited to NHC-owned HTTPS hosts, and downloads and
-expanded archives are size-limited before parsing.
+Cyclone requests are limited to NHC-owned HTTPS hosts. Place lookups use only
+Open-Meteo's fixed HTTPS search endpoint and OpenStreetMap Nominatim's fixed
+HTTPS reverse endpoint. All interfaces refuse redirects and non-success
+responses and enforce streaming response limits before parsing. Place-name
+responses are capped at 64 KiB, Open-Meteo results are capped at eight, and
+remote display fields and coordinates are validated again before QML renders
+them. Reverse lookups are debounced, serialized, and discarded when they no
+longer match the selected point.
+
+Location results are provided by
+[Open-Meteo](https://open-meteo.com/en/docs/geocoding-api) using
+[GeoNames](https://www.geonames.org/) place data.
+Map-click place names are provided by
+[OpenStreetMap contributors](https://www.openstreetmap.org/copyright) through
+[Nominatim](https://nominatim.org/release-docs/latest/api/Reverse/).
 
 The latest data is cached at `~/.cache/omanado/storms.json`. If you have set
 `$XDG_CACHE_HOME`, the cache is stored in `$XDG_CACHE_HOME/omanado/storms.json`
