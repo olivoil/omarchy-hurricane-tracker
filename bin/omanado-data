@@ -1218,6 +1218,8 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
                 if url:
                     maximum = MAX_TEXT_BYTES if layer == "discussion" else MAX_KMZ_BYTES
                     jobs[executor.submit(fetcher, url, maximum)] = (index, layer)
+                elif layer in ("track", "cone"):
+                    storms[index]["dataWarnings"].append(f"{layer} unavailable")
         for future in concurrent.futures.as_completed(jobs):
             index, layer = jobs[future]
             try:
