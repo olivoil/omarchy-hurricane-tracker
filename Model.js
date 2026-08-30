@@ -1059,7 +1059,7 @@ function stabilizedAlertSnapshots(previous, current, incompleteOutlookBasins,
     if (preserveOutlook) {
       var currentMatch = matchingSnapshotEntry(after, previousItem, ({}))
       var currentSourceBasin = outlookSourceBasin(currentMatch && currentMatch.item)
-      if (currentMatch && currentSourceBasin !== outlookSourceBasin(previousItem)
+      if (currentMatch && currentSourceBasin !== ""
           && !incompleteOutlooks[currentSourceBasin]) continue
     }
     var systemKey = previousItem.scope === "place"
