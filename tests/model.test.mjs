@@ -151,13 +151,22 @@ assert.ok(model.regionCoordinates([storm], [outlook], "al").length > model.syste
 
 assert.equal(model.alertRegionCode("Atlantic"), "al")
 assert.equal(model.alertThresholdValue("Medium (40%)"), 40)
-assert.equal(model.alertRegionDataComplete("Atlantic", []), true)
-assert.equal(model.alertRegionDataComplete("Atlantic", ["al"]), false)
-assert.equal(model.alertRegionDataComplete("Atlantic", ["ep"]), true)
-assert.equal(model.alertRegionDataComplete("Eastern Pacific", ["cp"]), false)
-assert.equal(model.alertRegionDataComplete("Central Pacific", ["ep"]), false)
-assert.equal(model.alertRegionDataComplete("All NHC basins", ["al"]), false)
-assert.equal(model.alertRegionDataComplete("Off", ["al", "ep", "cp"]), true)
+assert.deepEqual(
+  Array.from(model.relevantIncompleteAlertBasins("Atlantic", ["al", "ep"])),
+  ["al"]
+)
+assert.deepEqual(
+  Array.from(model.relevantIncompleteAlertBasins("Atlantic", ["ep"])),
+  []
+)
+assert.deepEqual(
+  Array.from(model.relevantIncompleteAlertBasins("Eastern Pacific", ["al", "cp"])),
+  ["cp"]
+)
+assert.deepEqual(
+  Array.from(model.relevantIncompleteAlertBasins("All NHC basins", ["al", "ep"])),
+  ["al", "ep"]
+)
 const quietSnapshot = model.alertSnapshot([], [outlook], "Atlantic", "Medium (40%)", true)
 assert.equal(model.alertEvents({}, quietSnapshot).length, 0)
 const developing = { ...outlook, sevenDayChance: 40 }
@@ -308,6 +317,65 @@ assert.deepEqual(
   Array.from(model.alertEvents(
     healthyBasinDuringPartial.before, healthyBasinDuringPartial.current
   ), item => item.key),
+  ["outlook:ep-outlook-1"]
+)
+
+const armedWithAtlanticOutlookUnavailable = model.basinAlertTransition(
+  {}, {}, "Atlantic", ["al"], [], true
+)
+assert.deepEqual(
+  Array.from(armedWithAtlanticOutlookUnavailable.pendingOutlookBasins),
+  ["al"]
+)
+const namedStormDuringOutlookOutage = model.basinAlertTransition(
+  armedWithAtlanticOutlookUnavailable.current,
+  model.alertSnapshot([storm], [], "Atlantic", "Medium (40%)", true),
+  "Atlantic", ["al"],
+  armedWithAtlanticOutlookUnavailable.pendingOutlookBasins,
+  false
+)
+assert.deepEqual(
+  Array.from(namedStormDuringOutlookOutage.events, item => item.key),
+  ["storm:al012026"]
+)
+assert.deepEqual(
+  Array.from(namedStormDuringOutlookOutage.pendingOutlookBasins),
+  ["al"]
+)
+const recoveredOutlookBaseline = model.basinAlertTransition(
+  namedStormDuringOutlookOutage.current,
+  model.alertSnapshot([storm], [developing], "Atlantic", "Medium (40%)", true),
+  "Atlantic", [], namedStormDuringOutlookOutage.pendingOutlookBasins, false
+)
+assert.deepEqual(Array.from(recoveredOutlookBaseline.events), [])
+assert.deepEqual(Array.from(recoveredOutlookBaseline.pendingOutlookBasins), [])
+const newOutlookAfterRecovery = model.basinAlertTransition(
+  recoveredOutlookBaseline.current,
+  model.alertSnapshot(
+    [storm], [developing, newlyRecoveredOutlook],
+    "Atlantic", "Medium (40%)", true
+  ),
+  "Atlantic", [], recoveredOutlookBaseline.pendingOutlookBasins, false
+)
+assert.deepEqual(
+  Array.from(newOutlookAfterRecovery.events, item => item.key),
+  ["outlook:al-outlook-new"]
+)
+
+const armedAllBasinsWithAtlanticUnavailable = model.basinAlertTransition(
+  {}, {}, "All NHC basins", ["al"], [], true
+)
+const healthyPacificOutlookDuringAtlanticOutage = model.basinAlertTransition(
+  armedAllBasinsWithAtlanticUnavailable.current,
+  model.alertSnapshot(
+    [], [easternPacificDeveloping], "All NHC basins", "Medium (40%)", true
+  ),
+  "All NHC basins", ["al"],
+  armedAllBasinsWithAtlanticUnavailable.pendingOutlookBasins,
+  false
+)
+assert.deepEqual(
+  Array.from(healthyPacificOutlookDuringAtlanticOutage.events, item => item.key),
   ["outlook:ep-outlook-1"]
 )
 

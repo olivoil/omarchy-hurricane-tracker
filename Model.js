@@ -1279,18 +1279,25 @@ function alertRegionCode(value) {
   return ""
 }
 
-function alertRegionDataComplete(regionValue, incompleteOutlookBasins) {
+function relevantIncompleteAlertBasins(regionValue, incompleteOutlookBasins) {
   var basin = alertRegionCode(regionValue)
-  if (!basin) return true
+  if (!basin) return []
   var incomplete = Array.isArray(incompleteOutlookBasins)
     ? incompleteOutlookBasins : []
+  var output = []
+  var seen = ({})
   for (var i = 0; i < incomplete.length; i++) {
     var unavailable = String(incomplete[i] || "")
-    if (basin === "all" || unavailable === basin) return false
-    if ((basin === "ep" || basin === "cp")
-        && (unavailable === "ep" || unavailable === "cp")) return false
+    if (unavailable !== "al" && unavailable !== "ep" && unavailable !== "cp") continue
+    var relevant = basin === "all" || unavailable === basin
+      || ((basin === "ep" || basin === "cp")
+        && (unavailable === "ep" || unavailable === "cp"))
+    if (relevant && !seen[unavailable]) {
+      seen[unavailable] = true
+      output.push(unavailable)
+    }
   }
-  return true
+  return output
 }
 
 function alertThresholdValue(value) {
@@ -1351,6 +1358,53 @@ function alertEvents(previous, current) {
     if (item.kind === "outlook" && item.meetsThreshold && (!old || !old.meetsThreshold)) events.push(item)
   }
   return events
+}
+
+function basinAlertTransition(previous, current, regionValue,
+    incompleteOutlookBasins, pendingOutlookBasins, resetQuietly) {
+  var currentSnapshot = copySnapshot(current)
+  if (resetQuietly) {
+    return {
+      current: currentSnapshot,
+      events: [],
+      pendingOutlookBasins: relevantIncompleteAlertBasins(
+        regionValue, incompleteOutlookBasins)
+    }
+  }
+
+  var stable = stabilizedAlertSnapshots(
+    previous, currentSnapshot, incompleteOutlookBasins, [])
+  var pending = stringSet(pendingOutlookBasins)
+  var candidates = alertEvents(stable.before, stable.current)
+  var events = []
+  for (var i = 0; i < candidates.length; i++) {
+    var event = candidates[i]
+    if (event && event.kind === "outlook"
+        && pending[outlookSourceBasin(event)]) continue
+    events.push(event)
+  }
+
+  // A feed that was unavailable when alerts were armed gets one quiet payload
+  // when it recovers. Named storms and other outlook feeds remain live while
+  // that source is pending.
+  var stillIncomplete = stringSet(relevantIncompleteAlertBasins(
+    regionValue, incompleteOutlookBasins))
+  var pendingRows = Array.isArray(pendingOutlookBasins)
+    ? pendingOutlookBasins : []
+  var remaining = []
+  var seen = ({})
+  for (var p = 0; p < pendingRows.length; p++) {
+    var basin = String(pendingRows[p] || "")
+    if (stillIncomplete[basin] && !seen[basin]) {
+      seen[basin] = true
+      remaining.push(basin)
+    }
+  }
+  return {
+    current: stable.current,
+    events: events,
+    pendingOutlookBasins: remaining
+  }
 }
 
 function selectedIndexAfterRefresh(storms, selectedId) {

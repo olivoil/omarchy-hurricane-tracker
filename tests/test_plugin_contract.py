@@ -372,11 +372,8 @@ class PluginContractTests(unittest.TestCase):
             place_evaluation,
         )
 
-    def test_basin_alert_rearm_waits_for_relevant_partial_data(self):
+    def test_basin_alert_rearm_quiets_only_incomplete_outlooks(self):
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
-        completeness = service.split("function alertFeedsComplete()", 1)[1].split(
-            "function placeAlertSnapshotComplete", 1
-        )[0]
         arm_alerts = service.split("function armAlertsQuietly()", 1)[1].split(
             "function armPlaceAlertsQuietly", 1
         )[0]
@@ -384,9 +381,11 @@ class PluginContractTests(unittest.TestCase):
             "if (placeAlertsEnabled)", 1
         )[0]
 
-        self.assertIn("Model.alertRegionDataComplete", completeness)
-        self.assertIn("&& alertFeedsComplete()", arm_alerts)
-        self.assertIn("alertsArmed = alertFeedsComplete()", global_evaluation)
+        self.assertIn("Model.relevantIncompleteAlertBasins", arm_alerts)
+        self.assertNotIn("alertFeedsComplete", arm_alerts)
+        self.assertIn("Model.basinAlertTransition", global_evaluation)
+        self.assertIn("pendingOutlookBasins", global_evaluation)
+        self.assertNotIn("alertsArmed = alertFeedsComplete()", global_evaluation)
 
     def test_full_outages_preserve_the_last_fresh_alert_baselines(self):
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")

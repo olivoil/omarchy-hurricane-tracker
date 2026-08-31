@@ -18,7 +18,10 @@ same cyclone, outlook, region, and watch-place arrays to every bar instance and
 the overlay. It maintains separate session-local baselines for basin and
 place-proximity alerts, then sends at most one grouped notification for a
 refresh. This avoids one network poll per monitor and avoids startup
-notification floods.
+notification floods. If an outlook feed is unavailable when a basin alert is
+armed or reconfigured, only that source waits for one quiet recovery payload;
+named storms and healthy outlook feeds continue comparing against their live
+baselines.
 
 The service also resolves the system measurement family once from Qt's locale,
 so the bar, overlay, and notifications present the same units. Model formatters

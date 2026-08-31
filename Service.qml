@@ -68,6 +68,7 @@ Item {
   property var alertBaseline: ({})
   property bool alertsArmed: false
   property string appliedAlertConfig: ""
+  property var quietPendingOutlookBasins: []
   property var placeAlertBaseline: ({})
   property bool placeAlertsArmed: false
   property string appliedPlaceAlertConfig: ""
@@ -507,10 +508,6 @@ Item {
     return Model.watchAlertSnapshot(storms, outlooks, watchPlaces, formationThreshold)
   }
 
-  function alertFeedsComplete() {
-    return Model.alertRegionDataComplete(alertRegion, incompleteOutlookBasins)
-  }
-
   function placeAlertSnapshotComplete(snapshot) {
     var summaries = Model.watchPlaceSummaries(
       storms, outlooks, watchPlaces, formationThreshold, useImperial,
@@ -525,7 +522,8 @@ Item {
   function armAlertsQuietly() {
     alertBaseline = currentAlertSnapshot()
     alertsArmed = alertsEnabled && hasLoaded && !stale && status === "fresh"
-      && alertFeedsComplete()
+    quietPendingOutlookBasins = alertsArmed
+      ? Model.relevantIncompleteAlertBasins(alertRegion, incompleteOutlookBasins) : []
     appliedAlertConfig = alertConfigKey
   }
 
@@ -545,6 +543,7 @@ Item {
       alertBaseline = ({})
       alertsArmed = false
       appliedAlertConfig = alertConfigKey
+      quietPendingOutlookBasins = []
       placeAlertBaseline = ({})
       placeAlertsArmed = false
       appliedPlaceAlertConfig = placeAlertConfigKey
@@ -557,20 +556,20 @@ Item {
     var incompleteForecastKeys = root.incompleteForecastSystemKeys
     if (alertsEnabled) {
       var current = currentAlertSnapshot()
-      if (!alertsArmed || appliedAlertConfig !== alertConfigKey) {
-        alertBaseline = current
-        alertsArmed = alertFeedsComplete()
-      } else {
-        var stableAlerts = Model.stabilizedAlertSnapshots(
-          alertBaseline, current, incompleteOutlookBasins, [])
-        events = events.concat(Model.alertEvents(stableAlerts.before, stableAlerts.current))
-        alertBaseline = stableAlerts.current
-      }
+      var resetBasinAlerts = !alertsArmed || appliedAlertConfig !== alertConfigKey
+      var basinTransition = Model.basinAlertTransition(
+        alertBaseline, current, alertRegion, incompleteOutlookBasins,
+        quietPendingOutlookBasins, resetBasinAlerts)
+      alertBaseline = basinTransition.current
+      quietPendingOutlookBasins = basinTransition.pendingOutlookBasins
+      alertsArmed = true
+      events = events.concat(basinTransition.events)
       appliedAlertConfig = alertConfigKey
     } else {
       alertBaseline = ({})
       alertsArmed = false
       appliedAlertConfig = alertConfigKey
+      quietPendingOutlookBasins = []
     }
 
     if (placeAlertsEnabled) {
