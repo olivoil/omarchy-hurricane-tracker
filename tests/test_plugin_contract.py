@@ -89,6 +89,27 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('placeholderText: "Home, Beach House, Mom’s Place"', overlay)
         self.assertNotIn("Home, Dad", overlay)
 
+    def test_alerts_button_and_shortcut_share_toggle_navigation(self):
+        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        toggle_alerts = overlay.split("function toggleAlerts()", 1)[1].split(
+            "function toggleTrackerMenu", 1
+        )[0]
+        alerts_button = overlay.split("id: alertsButton", 1)[1].split(
+            "Row {", 1
+        )[0]
+        alerts_shortcut = overlay.split("event.key === Qt.Key_A", 1)[1].split(
+            "event.accepted = true", 1
+        )[0]
+
+        self.assertIn('if (sidebarMode === "alerts") showActivity()', toggle_alerts)
+        self.assertIn("else showAlerts()", toggle_alerts)
+        self.assertIn("onClicked: root.toggleAlerts()", alerts_button)
+        self.assertIn("root.toggleAlerts()", alerts_shortcut)
+        self.assertIn(
+            'root.sidebarMode === "alerts"\n            ? "Back to activity (A)"',
+            alerts_button,
+        )
+
     def test_tracker_rows_begin_directly_below_the_introduction_separator(self):
         overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
         tracker_menu_lead = overlay.split('id: trackerMenuPanel', 1)[1].split(

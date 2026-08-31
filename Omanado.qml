@@ -267,6 +267,11 @@ Item {
     keyCatcher.forceActiveFocus()
   }
 
+  function toggleAlerts() {
+    if (sidebarMode === "alerts") showActivity()
+    else showAlerts()
+  }
+
   function toggleTrackerMenu() {
     if (sidebarMode !== "activity") sidebarMode = "activity"
     trackerMenuOpen = !trackerMenuOpen
@@ -800,8 +805,7 @@ Item {
             root.refresh()
             event.accepted = true
           } else if (event.key === Qt.Key_A) {
-            if (root.sidebarMode === "alerts") root.showActivity()
-            else root.showAlerts()
+            root.toggleAlerts()
             event.accepted = true
           } else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) {
             stormMap.zoomIn()
@@ -905,20 +909,22 @@ Item {
           radius: Style.space(7)
           bordered: true
           selected: root.sidebarMode === "alerts"
-          tooltipText: root.alertUpdateCount === 0
-            ? (root.alertLimitedDestinationCount > 0
-              ? "Manage alerts (A). " + String(root.alertLimitedDestinationCount)
-                + (root.alertLimitedDestinationCount === 1
-                  ? " watched location has limited coverage"
-                  : " watched locations have limited coverage")
-              : "Manage alerts (A). No watched locations need attention")
-            : (root.alertUpdateCount === 1
-              ? "1 watched location needs attention"
-              : String(root.alertUpdateCount) + " watched locations need attention")
+          tooltipText: root.sidebarMode === "alerts"
+            ? "Back to activity (A)"
+            : (root.alertUpdateCount === 0
+              ? (root.alertLimitedDestinationCount > 0
+                ? "Manage alerts (A). " + String(root.alertLimitedDestinationCount)
+                  + (root.alertLimitedDestinationCount === 1
+                    ? " watched location has limited coverage"
+                    : " watched locations have limited coverage")
+                : "Manage alerts (A). No watched locations need attention")
+              : (root.alertUpdateCount === 1
+                ? "1 watched location needs attention"
+                : String(root.alertUpdateCount) + " watched locations need attention"))
           focusable: true
           foreground: root.foreground
           accent: root.accent
-          onClicked: root.showAlerts()
+          onClicked: root.toggleAlerts()
           Accessible.name: tooltipText
 
           Row {
