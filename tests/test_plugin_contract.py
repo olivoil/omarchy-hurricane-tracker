@@ -146,6 +146,9 @@ class PluginContractTests(unittest.TestCase):
 
     def test_region_overview_clears_the_selected_system(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        sidebar_mode_change = overlay.split("onSidebarModeChanged:", 1)[1].split(
+            "readonly property string pluginId", 1
+        )[0]
         sync_selection = overlay.split("function syncSelection", 1)[1].split(
             "function rowIndexForKey", 1
         )[0]
@@ -157,6 +160,10 @@ class PluginContractTests(unittest.TestCase):
         )[0]
 
         self.assertIn('property string regionOverviewBasin: ""', overlay)
+        self.assertIn(
+            'if (sidebarMode === "alerts") regionOverviewBasin = ""',
+            sidebar_mode_change,
+        )
         self.assertIn("if (regionOverviewBasin)", sync_selection)
         self.assertIn("fitRegionOverview(regionOverviewBasin)", sync_selection)
         self.assertLess(

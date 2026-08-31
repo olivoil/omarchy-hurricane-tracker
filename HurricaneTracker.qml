@@ -42,6 +42,7 @@ Item {
   }
 
   onSidebarModeChanged: {
+    if (sidebarMode === "alerts") regionOverviewBasin = ""
     if (sidebarMode !== "alerts" && editingWatchPlace)
       cancelWatchPlaceEditor()
   }

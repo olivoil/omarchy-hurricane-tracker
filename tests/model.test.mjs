@@ -172,6 +172,37 @@ assert.equal(model.alertEvents(
   model.alertSnapshot([], [invest], "Atlantic", "Medium (40%)", true),
   model.alertSnapshot([], [renamedInvest], "Atlantic", "Medium (40%)", true)
 ).length, 0)
+const reusedFarInvest = {
+  ...invest,
+  name: "Eastern Tropical Atlantic (AL90)",
+  title: "Eastern Tropical Atlantic (AL90)",
+  latitude: 16.2,
+  longitude: -25,
+  area: [[[-27, 15], [-23, 15], [-23, 17], [-27, 17], [-27, 15]]]
+}
+assert.equal(model.outlookSnapshotIdentityMatches(invest, reusedFarInvest), false)
+assert.equal(model.alertEvents(
+  model.alertSnapshot([], [invest], "Atlantic", "Medium (40%)", true),
+  model.alertSnapshot([], [reusedFarInvest], "Atlantic", "Medium (40%)", true)
+).length, 1)
+const reusedInvestWatch = {
+  id: "reused-invest-watch",
+  name: "Mid-Atlantic",
+  latitude: 16.2,
+  longitude: -38,
+  radiusKm: 2000
+}
+const oldInvestWatchSnapshot = model.watchAlertSnapshot(
+  [], [invest], [reusedInvestWatch], "Medium (40%)"
+)
+const reusedInvestWatchSnapshot = model.watchAlertSnapshot(
+  [], [reusedFarInvest], [reusedInvestWatch], "Medium (40%)"
+)
+assert.equal(Object.values(oldInvestWatchSnapshot)[0].meetsThreshold, true)
+assert.equal(Object.values(reusedInvestWatchSnapshot)[0].meetsThreshold, true)
+assert.equal(model.watchAlertEvents(
+  oldInvestWatchSnapshot, reusedInvestWatchSnapshot
+).length, 1)
 assert.equal(model.alertEvents(
   model.alertSnapshot([], [invest], "Atlantic", "Medium (40%)", true),
   model.alertSnapshot([], [{

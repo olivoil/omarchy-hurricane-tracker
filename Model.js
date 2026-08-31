@@ -526,6 +526,7 @@ function trackingSummary(storms, outlooks) {
 
 var EARTH_RADIUS_KM = 6371.0088
 var UNREACHABLE_DISTANCE_KM = 999999
+var OUTLOOK_IDENTITY_MAX_DISTANCE_KM = 1800
 
 function radians(value) {
   return Number(value) * Math.PI / 180
@@ -992,17 +993,22 @@ function outlookSnapshotIdentityMatches(first, second) {
     && validCoordinate(second.latitude, second.longitude)
   var distance = coordinatesAvailable ? haversineDistanceKm(
     first.latitude, first.longitude, second.latitude, second.longitude) : Infinity
+  var firstWithoutInvest = outlookIdentityWithoutInvest(first)
+  var secondWithoutInvest = outlookIdentityWithoutInvest(second)
+  var contentMatches = firstWithoutInvest !== ""
+    && firstWithoutInvest === secondWithoutInvest
   if (firstStableIdentifier !== "" || secondStableIdentifier !== "") {
-    if (firstStableIdentifier !== "" && firstStableIdentifier === secondStableIdentifier)
-      return true
-    if (!crossesPacificBoundary || !coordinatesAvailable || distance > 1800) return false
-    var firstWithoutInvest = outlookIdentityWithoutInvest(first)
-    var secondWithoutInvest = outlookIdentityWithoutInvest(second)
-    return firstWithoutInvest !== "" && firstWithoutInvest === secondWithoutInvest
+    if (firstStableIdentifier !== "" && firstStableIdentifier === secondStableIdentifier) {
+      return contentMatches || (coordinatesAvailable
+        && distance <= OUTLOOK_IDENTITY_MAX_DISTANCE_KM)
+    }
+    if (!crossesPacificBoundary || !coordinatesAvailable
+        || distance > OUTLOOK_IDENTITY_MAX_DISTANCE_KM) return false
+    return contentMatches
   }
   if (firstIdentity === "" || firstIdentity !== secondIdentity) return false
   if (crossesPacificBoundary && !coordinatesAvailable) return false
-  return !coordinatesAvailable || distance <= 1800
+  return !coordinatesAvailable || distance <= OUTLOOK_IDENTITY_MAX_DISTANCE_KM
 }
 
 function matchingSnapshotEntry(before, item, usedKeys) {
