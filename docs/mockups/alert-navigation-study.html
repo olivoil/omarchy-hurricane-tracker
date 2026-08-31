@@ -1,0 +1,2049 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hurricane Tracker alert navigation study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #182125;
+      --shell: #202a2f;
+      --surface: #283338;
+      --surface-raised: #303b40;
+      --surface-soft: #253035;
+      --line: #827f70;
+      --line-soft: #485257;
+      --text: #d8c69f;
+      --text-strong: #ead9b4;
+      --muted: #8d958e;
+      --faint: #69747a;
+      --aqua: #39cbbb;
+      --aqua-soft: #7ca9ad;
+      --amber: #d6ad67;
+      --coral: #dc7968;
+      --shadow: rgba(6, 12, 14, 0.44);
+      --sidebar-width: clamp(330px, 25vw, 410px);
+      --sidebar-footer-height: 34px;
+      --header-height: 68px;
+      --study-height: 46px;
+      font-family: "JetBrains Mono", "Iosevka", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--page);
+      color: var(--text);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 2px solid var(--aqua);
+      outline-offset: 2px;
+    }
+
+    .study {
+      display: grid;
+      grid-template-rows: var(--study-height) minmax(0, 1fr);
+      width: 100%;
+      height: 100%;
+      padding: 8px;
+      gap: 8px;
+    }
+
+    .study-bar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+      padding: 0 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: #20292d;
+      box-shadow: 0 10px 30px var(--shadow);
+    }
+
+    .study-label {
+      flex: 0 0 auto;
+      color: var(--text-strong);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+    }
+
+    .study-badge {
+      flex: 0 0 auto;
+      padding: 7px 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #182125;
+      color: var(--aqua);
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .concept-switch {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #182125;
+    }
+
+    .concept-switch button {
+      min-height: 28px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+
+    .concept-switch button[aria-pressed="true"] {
+      background: var(--surface-raised);
+      color: var(--text-strong);
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+
+    .study-description {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: var(--header-height) minmax(0, 1fr);
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--shell);
+      box-shadow: 0 22px 70px var(--shadow);
+    }
+
+    .app-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+      align-items: center;
+      gap: 0;
+      min-width: 0;
+      padding: 0;
+      border-bottom: 1px solid var(--line);
+      background: #263137;
+    }
+
+    .brand {
+      min-width: 0;
+      padding: 0 20px;
+    }
+
+    .brand-name {
+      overflow: hidden;
+      color: var(--text-strong);
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: 0.11em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .brand-subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      min-width: 0;
+      height: 100%;
+      padding: 0 10px 0 12px;
+    }
+
+    .global-alerts {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 0 9px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+    }
+
+    .global-alerts:hover,
+    .app[data-view="alerts"] .global-alerts,
+    .app[data-view="edit"] .global-alerts {
+      border-color: var(--aqua-soft);
+      background: rgba(57, 203, 187, 0.08);
+      color: var(--text-strong);
+    }
+
+    .global-alerts-glyph {
+      color: var(--aqua);
+      font-size: 12px;
+    }
+
+    .icon-button {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .icon-button:hover {
+      background: var(--surface-raised);
+      color: var(--text-strong);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .map-stage {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 48% 44%, rgba(62, 89, 93, 0.18), transparent 46%),
+        #212c31;
+    }
+
+    .map-stage::after {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(90deg, rgba(26, 35, 39, 0.14), transparent 18%, transparent 78%, rgba(26, 35, 39, 0.24));
+      content: "";
+    }
+
+    .world-map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .globe-ocean {
+      fill: #2a383d;
+      stroke: #4e7779;
+      stroke-width: 2;
+    }
+
+    .globe-grid {
+      fill: none;
+      stroke: #627074;
+      stroke-width: 1;
+      opacity: 0.22;
+    }
+
+    .globe-land {
+      fill: #515b59;
+      stroke: #747769;
+      stroke-width: 1.4;
+    }
+
+    .globe-shade {
+      fill: rgba(18, 27, 31, 0.24);
+    }
+
+    .event-marker circle:first-child {
+      fill: #1d292d;
+      stroke: #172126;
+      stroke-width: 5;
+      opacity: 0.64;
+    }
+
+    .event-marker circle:last-child {
+      fill: var(--aqua-soft);
+      stroke: #a4b4ae;
+      stroke-width: 1.5;
+    }
+
+    .event-marker.impact circle:last-child {
+      fill: var(--aqua);
+    }
+
+    .cyclone-marker .outer {
+      fill: #273438;
+      stroke: #e1cda4;
+      stroke-width: 2;
+    }
+
+    .cyclone-marker .inner {
+      fill: var(--aqua);
+      stroke: #d5ede4;
+      stroke-width: 1.5;
+    }
+
+    .cyclone-track {
+      fill: none;
+      stroke: #d8c69f;
+      stroke-width: 2.5;
+      stroke-dasharray: 10 8;
+      opacity: 0.8;
+    }
+
+    .cyclone-cone {
+      fill: rgba(57, 203, 187, 0.12);
+      stroke: #75aaa7;
+      stroke-width: 2;
+    }
+
+    .earthquake-layer,
+    .cyclone-layer {
+      transition: opacity 180ms ease-out;
+    }
+
+    .app[data-hazard="earthquakes"] .cyclone-layer,
+    .app[data-hazard="cyclones"] .earthquake-layer {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .place-dot .halo {
+      fill: rgba(57, 203, 187, 0.1);
+      stroke: rgba(57, 203, 187, 0.38);
+      stroke-width: 1;
+    }
+
+    .place-dot .core {
+      fill: var(--aqua);
+      stroke: #d0e0d7;
+      stroke-width: 1.5;
+    }
+
+    .place-dot text {
+      fill: var(--text-strong);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      opacity: 0;
+      paint-order: stroke;
+      stroke: #263237;
+      stroke-width: 5px;
+      transition: opacity 160ms ease-out;
+    }
+
+    .app[data-view="edit"] .place-dot.selected text,
+    .app[data-scope="home"] .place-dot[data-place="home"] text,
+    .app[data-scope="family"] .place-dot[data-place="family"] text,
+    .app[data-scope="rennes"] .place-dot[data-place="rennes"] text {
+      opacity: 1;
+    }
+
+    .place-dot.selected .halo {
+      fill: rgba(57, 203, 187, 0.18);
+      stroke: var(--aqua);
+      stroke-width: 2;
+    }
+
+    .edit-radius {
+      fill: rgba(57, 203, 187, 0.08);
+      stroke: var(--aqua);
+      stroke-width: 2;
+      stroke-dasharray: 7 7;
+      opacity: 0;
+      transition: opacity 180ms ease-out;
+    }
+
+    .app[data-view="edit"] .edit-radius {
+      opacity: 1;
+    }
+
+    .map-summary {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      z-index: 2;
+      width: min(330px, calc(100% - 90px));
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(47, 59, 64, 0.94);
+      box-shadow: 0 12px 32px rgba(12, 19, 22, 0.2);
+    }
+
+    .summary-main {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 58px;
+      padding: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .summary-badge {
+      display: grid;
+      min-width: 42px;
+      height: 42px;
+      place-items: center;
+      border: 2px solid var(--aqua-soft);
+      border-radius: 9px;
+      color: var(--aqua-soft);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .summary-copy {
+      min-width: 0;
+    }
+
+    .summary-title {
+      overflow: hidden;
+      color: var(--text-strong);
+      font-size: 13px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-meta {
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-age {
+      color: var(--muted);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .summary-facts {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 8px 10px 10px;
+    }
+
+    .summary-fact {
+      min-width: 0;
+      padding: 0 8px;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .summary-fact:first-child {
+      padding-left: 0;
+    }
+
+    .summary-fact:last-child {
+      padding-right: 0;
+      border-right: 0;
+    }
+
+    .summary-fact-label {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+    }
+
+    .summary-fact-value {
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .map-legend,
+    .map-instruction {
+      position: absolute;
+      z-index: 2;
+      bottom: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: rgba(38, 49, 54, 0.9);
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+
+    .map-legend {
+      left: 12px;
+      padding: 9px 11px;
+    }
+
+    .map-instruction {
+      left: 50%;
+      padding: 8px 12px;
+      transform: translateX(-50%);
+      color: var(--text);
+    }
+
+    .map-tools {
+      position: absolute;
+      z-index: 2;
+      right: 10px;
+      bottom: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .map-tools button {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: rgba(38, 49, 54, 0.92);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 17px;
+      font-weight: 800;
+    }
+
+    .sidebar {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border-left: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .panel-view {
+      position: absolute;
+      inset: 0 0 var(--sidebar-footer-height);
+      display: none;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--surface-soft);
+    }
+
+    .sidebar-utilities {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      display: flex;
+      height: var(--sidebar-footer-height);
+      align-items: center;
+      gap: 5px;
+      padding: 0 7px 0 12px;
+      border-top: 1px solid var(--line-soft);
+      background: #202a2f;
+    }
+
+    .sidebar-data-health {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 7px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+
+    .sidebar-data-health::before {
+      width: 5px;
+      height: 5px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: var(--aqua);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--aqua) 70%, transparent);
+      content: "";
+    }
+
+    .feed-count {
+      color: var(--faint);
+      font-size: 6px;
+    }
+
+    .sidebar-utility-actions {
+      display: flex;
+      align-items: center;
+      gap: 1px;
+      margin-left: auto;
+    }
+
+    .sidebar-utility-button {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .sidebar-utility-button:hover {
+      background: var(--surface-raised);
+      color: var(--text-strong);
+    }
+
+    .app[data-view="activity"] .activity-panel,
+    .app[data-view="alerts"] .alerts-panel,
+    .app[data-view="edit"] .edit-panel {
+      display: flex;
+    }
+
+    .module-header,
+    .subview-header {
+      position: relative;
+      flex: 0 0 auto;
+      min-height: 70px;
+      padding: 13px 12px 11px;
+      border-bottom: 1px solid var(--line);
+      background: #293439;
+    }
+
+    .module-header {
+      min-height: 56px;
+      padding: 10px 12px;
+    }
+
+    .module-heading-row,
+    .subview-heading-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .mode-button {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      min-height: 34px;
+      padding: 0 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-strong);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-align: left;
+    }
+
+    .mode-button:hover,
+    .mode-button[aria-expanded="true"] {
+      background: var(--surface-raised);
+    }
+
+    .mode-glyph {
+      margin-right: 8px;
+      color: var(--aqua);
+      font-size: 16px;
+    }
+
+    .mode-chevron {
+      margin-left: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .module-count,
+    .subview-count {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-align: right;
+    }
+
+    .alert-count {
+      display: grid;
+      min-width: 17px;
+      height: 17px;
+      place-items: center;
+      border-radius: 999px;
+      background: rgba(57, 203, 187, 0.14);
+      color: var(--aqua);
+      font-size: 8px;
+    }
+
+    .mode-menu {
+      position: absolute;
+      z-index: 12;
+      inset: 56px 0 0;
+      display: none;
+      overflow: auto;
+      background: #253035;
+    }
+
+    .mode-menu[data-open="true"] {
+      display: block;
+    }
+
+    .tracker-menu-intro {
+      padding: 17px 14px 13px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #273237;
+    }
+
+    .tracker-menu-title {
+      color: var(--text-strong);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.1em;
+    }
+
+    .tracker-menu-intro p {
+      max-width: 31ch;
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 8px;
+      line-height: 1.5;
+    }
+
+    .tracker-options {
+      padding: 8px 0;
+    }
+
+    .mode-menu .menu-item {
+      grid-template-columns: 74px minmax(0, 1fr) auto;
+      min-height: 88px;
+      padding: 10px 12px;
+      border-top: 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .mode-menu .menu-title {
+      font-size: 11px;
+    }
+
+    .mode-menu .menu-meta {
+      margin-top: 5px;
+      line-height: 1.45;
+      white-space: normal;
+    }
+
+    .tracker-preview {
+      position: relative;
+      display: grid;
+      width: 68px;
+      height: 60px;
+      overflow: hidden;
+      place-items: center;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      color: var(--text-strong);
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .tracker-preview.cyclones {
+      background:
+        radial-gradient(circle at 57% 50%, #263136 0 5px, var(--aqua-soft) 6px 8px, transparent 9px),
+        conic-gradient(from 35deg at 57% 50%, transparent 0 12%, rgba(57, 203, 187, 0.34) 13% 25%, transparent 26% 48%, rgba(124, 169, 173, 0.32) 49% 61%, transparent 62%),
+        #1f2b30;
+    }
+
+    .tracker-preview.earthquakes {
+      background:
+        radial-gradient(circle at 30% 34%, var(--aqua) 0 3px, #1d292d 4px 8px, transparent 9px),
+        radial-gradient(circle at 68% 63%, var(--aqua-soft) 0 4px, #1d292d 5px 11px, transparent 12px),
+        radial-gradient(circle at 75% 22%, var(--muted) 0 2px, #1d292d 3px 7px, transparent 8px),
+        linear-gradient(150deg, #344247, #202b30);
+    }
+
+    .tracker-preview.future {
+      border-style: dashed;
+      background: transparent;
+      color: var(--faint);
+    }
+
+    .mode-button .mode-chevron {
+      transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .mode-button[aria-expanded="true"] .mode-chevron {
+      transform: rotate(180deg);
+    }
+
+    .scope-menu {
+      position: absolute;
+      z-index: 10;
+      top: 45px;
+      left: 12px;
+      display: none;
+      width: calc(100% - 24px);
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #303b40;
+      box-shadow: 0 18px 42px var(--shadow);
+    }
+
+    .scope-menu[data-open="true"] {
+      display: block;
+    }
+
+    .menu-label {
+      padding: 10px 11px 7px;
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+    }
+
+    .menu-item {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 48px;
+      padding: 7px 10px;
+      border: 0;
+      border-top: 1px solid var(--line-soft);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .menu-item:hover,
+    .menu-item[aria-current="true"] {
+      background: #374348;
+    }
+
+    .menu-item[aria-current="true"] .menu-icon {
+      color: var(--aqua);
+    }
+
+    .menu-icon {
+      color: var(--aqua-soft);
+      font-size: 16px;
+      text-align: center;
+    }
+
+    .menu-title {
+      display: block;
+      color: var(--text-strong);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+    }
+
+    .menu-meta {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 8px;
+    }
+
+    .menu-state {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 800;
+    }
+
+    .menu-item.future {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .scope-bar {
+      position: relative;
+      display: none;
+      flex: 0 0 auto;
+      min-height: 52px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #263136;
+    }
+
+    .app[data-concept="scope"] .scope-bar {
+      display: flex;
+    }
+
+    .scope-button {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      min-height: 34px;
+      padding: 0 9px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #202b30;
+      color: var(--text-strong);
+      cursor: pointer;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+    }
+
+    .scope-button:hover,
+    .scope-button[aria-expanded="true"] {
+      border-color: var(--line);
+      background: var(--surface-raised);
+    }
+
+    .scope-context {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .scope-menu .menu-item {
+      grid-template-columns: 26px minmax(0, 1fr) auto;
+    }
+
+    .scope-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+      padding: 9px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .scope-actions button {
+      min-height: 34px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #273237;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 8px;
+      font-weight: 900;
+    }
+
+    .scope-actions button:hover {
+      border-color: var(--line);
+      background: #364247;
+    }
+
+    .section-heading {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--line);
+      color: var(--text);
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .section-heading span:last-child {
+      color: var(--muted);
+    }
+
+    .event-list {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow: auto;
+      overflow-x: hidden;
+      scrollbar-color: var(--line-soft) transparent;
+      scrollbar-width: thin;
+    }
+
+    .event-row {
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr);
+      gap: 9px;
+      width: 100%;
+      min-height: 74px;
+      align-items: center;
+      padding: 9px 11px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .event-row:hover,
+    .event-row[aria-current="true"] {
+      background: var(--surface-raised);
+    }
+
+    .event-row[aria-current="true"] .event-badge {
+      border-color: var(--aqua);
+      color: var(--aqua);
+    }
+
+    .event-badge {
+      display: grid;
+      width: 46px;
+      height: 40px;
+      place-items: center;
+      border: 2px solid var(--aqua-soft);
+      border-radius: 9px;
+      color: var(--aqua-soft);
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .event-copy {
+      min-width: 0;
+    }
+
+    .event-name {
+      display: block;
+      overflow: hidden;
+      color: var(--text-strong);
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .event-meta {
+      display: block;
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 700;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .event-details {
+      flex: 0 0 auto;
+      min-height: 112px;
+      padding: 10px 12px 12px;
+      border-top: 1px solid var(--line);
+      background: #273237;
+    }
+
+    .details-label {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: 0.1em;
+    }
+
+    .details-text {
+      margin-top: 7px;
+      color: var(--text);
+      font-size: 9px;
+      line-height: 1.55;
+    }
+
+    .details-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      margin-top: 9px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--text-strong);
+      font-size: 8px;
+      font-weight: 900;
+      text-decoration: none;
+    }
+
+    .back-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 0 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: 0.07em;
+    }
+
+    .back-button:hover {
+      background: var(--surface-raised);
+      color: var(--text-strong);
+    }
+
+    .subview-title {
+      color: var(--text-strong);
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .subview-summary {
+      flex: 0 0 auto;
+      padding: 13px;
+      border-bottom: 1px solid var(--line);
+      background: #263136;
+    }
+
+    .subview-summary strong {
+      display: block;
+      color: var(--aqua);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+    }
+
+    .subview-summary p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 8px;
+      line-height: 1.45;
+    }
+
+    .place-list {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow: auto;
+    }
+
+    .place-row {
+      width: 100%;
+      padding: 12px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .place-row:hover {
+      background: var(--surface-raised);
+    }
+
+    .place-row-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .place-name {
+      color: var(--text-strong);
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .place-status {
+      flex: 0 0 auto;
+      padding: 4px 6px;
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      color: var(--muted);
+      font-size: 7px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+    }
+
+    .place-status.update {
+      border-color: color-mix(in srgb, var(--amber) 70%, var(--line));
+      color: var(--amber);
+    }
+
+    .place-location {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 8px;
+    }
+
+    .place-rules {
+      display: grid;
+      gap: 4px;
+      margin-top: 9px;
+      color: var(--text);
+      font-size: 8px;
+      line-height: 1.35;
+    }
+
+    .place-rules span::before {
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      margin-right: 6px;
+      border-radius: 999px;
+      background: var(--aqua-soft);
+      vertical-align: 1px;
+      content: "";
+    }
+
+    .place-row.has-update .place-rules span:first-child::before {
+      background: var(--amber);
+    }
+
+    .primary-action {
+      flex: 0 0 auto;
+      min-height: 42px;
+      margin: 10px 12px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #303c40;
+      color: var(--text-strong);
+      cursor: pointer;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+    }
+
+    .primary-action:hover {
+      border-color: var(--aqua-soft);
+      background: #364448;
+    }
+
+    .edit-panel {
+      overflow: auto;
+    }
+
+    .edit-form {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow: auto;
+      padding: 13px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 13px;
+    }
+
+    .field label,
+    .rules-heading {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      min-height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #202b30;
+      color: var(--text-strong);
+      font-size: 9px;
+    }
+
+    .field-help {
+      color: var(--faint);
+      font-size: 7px;
+      line-height: 1.45;
+    }
+
+    .rule-card {
+      margin-top: 8px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #293438;
+    }
+
+    .rule-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--text-strong);
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .rule-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    .rule-grid label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 7px;
+      font-weight: 800;
+    }
+
+    .rule-grid select {
+      width: 100%;
+      min-width: 0;
+      height: 34px;
+      padding: 0 7px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      background: #202b30;
+      color: var(--text);
+      font-size: 8px;
+    }
+
+    .switch {
+      position: relative;
+      width: 34px;
+      height: 20px;
+    }
+
+    .switch input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .switch span {
+      position: absolute;
+      inset: 0;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      background: #20292d;
+      cursor: pointer;
+    }
+
+    .switch span::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--muted);
+      content: "";
+      transition: transform 160ms ease-out, background 160ms ease-out;
+    }
+
+    .switch input:checked + span {
+      border-color: color-mix(in srgb, var(--aqua) 65%, var(--line));
+      background: rgba(57, 203, 187, 0.12);
+    }
+
+    .switch input:checked + span::after {
+      background: var(--aqua);
+      transform: translateX(14px);
+    }
+
+    .form-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      flex: 0 0 auto;
+      gap: 8px;
+      padding: 11px 13px 13px;
+      border-top: 1px solid var(--line);
+      background: #263136;
+    }
+
+    .form-actions button {
+      min-height: 39px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #2d393e;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+    }
+
+    .form-actions .save {
+      border-color: var(--aqua-soft);
+      color: var(--text-strong);
+    }
+
+    .form-actions button:hover {
+      background: #38464a;
+    }
+
+    @media (max-width: 920px) {
+      :root {
+        --sidebar-width: min(390px, 43vw);
+      }
+
+      .study-description {
+        display: none;
+      }
+
+      .brand-subtitle {
+        display: none;
+      }
+
+      .summary-facts {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .summary-fact:last-child {
+        display: none;
+      }
+
+      .summary-fact:nth-child(2) {
+        border-right: 0;
+      }
+    }
+
+    @media (max-width: 680px) {
+      :root {
+        --study-height: 76px;
+      }
+
+      .study-bar {
+        flex-wrap: wrap;
+        align-content: center;
+        gap: 6px 12px;
+      }
+
+      .app-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      .header-actions {
+        gap: 8px;
+        border-left: 0;
+      }
+
+      .workspace {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: absolute;
+        inset: var(--header-height) 0 0 auto;
+        z-index: 5;
+        width: min(92vw, 410px);
+        box-shadow: -18px 0 42px var(--shadow);
+      }
+
+      .map-summary {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="study">
+    <header class="study-bar">
+      <div class="study-label">REFINED CONCEPT A</div>
+      <div class="study-badge">SCALABLE SIDEBAR</div>
+      <div class="study-description" id="studyDescription">
+        Alerts stay global; the tracker selector expands into the sidebar while quiet utilities move to its footer.
+      </div>
+    </header>
+
+    <section class="app" id="app" data-concept="alerts" data-view="activity" data-hazard="earthquakes" data-scope="worldwide">
+      <header class="app-header">
+        <div class="brand">
+          <div class="brand-name">HURRICANE TRACKER · NAVIGATION STUDY</div>
+          <div class="brand-subtitle">LIVE HAZARDS · OFFICIAL SOURCES · PERSONAL ALERTS</div>
+        </div>
+        <div class="header-actions">
+          <button class="global-alerts" id="openAlerts" type="button" aria-controls="alertsPanel" aria-pressed="false">
+            <span class="global-alerts-glyph">♢</span><span>ALERTS</span><span class="alert-count">3</span>
+          </button>
+          <button class="icon-button" type="button" aria-label="Close study" title="Close study">×</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <section class="map-stage" aria-label="Hazard map preview">
+          <svg class="world-map" viewBox="0 0 1200 780" role="img" aria-label="Stylized globe with hazard events and watched-place dots">
+            <defs>
+              <clipPath id="globeClip">
+                <circle cx="560" cy="402" r="334"></circle>
+              </clipPath>
+            </defs>
+
+            <circle class="globe-ocean" cx="560" cy="402" r="336"></circle>
+            <g clip-path="url(#globeClip)">
+              <ellipse class="globe-grid" cx="560" cy="402" rx="334" ry="84"></ellipse>
+              <ellipse class="globe-grid" cx="560" cy="402" rx="334" ry="174"></ellipse>
+              <ellipse class="globe-grid" cx="560" cy="402" rx="334" ry="263"></ellipse>
+              <path class="globe-grid" d="M560 67 C474 160 472 643 560 737"></path>
+              <path class="globe-grid" d="M560 67 C646 160 648 643 560 737"></path>
+              <path class="globe-grid" d="M560 67 C369 183 368 620 560 737"></path>
+              <path class="globe-grid" d="M560 67 C751 183 752 620 560 737"></path>
+
+              <path class="globe-land" d="M330 142 L385 105 476 99 540 120 599 117 658 141 681 176 651 201 626 219 596 218 577 248 532 254 500 280 457 276 435 300 391 287 367 259 335 247 312 208 321 177Z"></path>
+              <path class="globe-land" d="M681 176 L747 155 804 173 837 211 840 257 813 275 790 307 752 308 721 287 703 249 667 236 651 201Z"></path>
+              <path class="globe-land" d="M437 302 L479 302 516 330 537 369 531 411 553 446 536 486 498 515 476 562 436 582 406 553 399 509 378 473 389 431 371 388 394 348Z"></path>
+              <path class="globe-land" d="M734 319 L771 298 812 303 850 337 860 374 844 406 813 431 776 421 754 387 722 372 708 344Z"></path>
+              <path class="globe-land" d="M780 459 L823 443 864 459 889 492 872 526 829 537 792 518 763 487Z"></path>
+              <path class="globe-land" d="M292 513 L329 499 349 523 338 560 307 573 278 550Z"></path>
+              <path class="globe-land" d="M610 534 L633 521 652 541 643 574 620 581 602 557Z"></path>
+              <path class="globe-land" d="M858 550 L884 542 904 558 897 579 870 585 850 571Z"></path>
+
+              <path class="globe-shade" d="M560 67 A335 335 0 0 1 854 564 C754 487 716 347 716 212 C716 147 686 99 642 77Z"></path>
+
+              <g class="earthquake-layer">
+                <g class="event-marker impact" transform="translate(790 345)"><circle r="11"></circle><circle r="6"></circle></g>
+                <g class="event-marker" transform="translate(801 329)"><circle r="10"></circle><circle r="5"></circle></g>
+                <g class="event-marker impact" transform="translate(812 366)"><circle r="12"></circle><circle r="7"></circle></g>
+                <g class="event-marker" transform="translate(825 383)"><circle r="10"></circle><circle r="5"></circle></g>
+                <g class="event-marker" transform="translate(766 402)"><circle r="9"></circle><circle r="4"></circle></g>
+                <g class="event-marker" transform="translate(742 441)"><circle r="10"></circle><circle r="5"></circle></g>
+                <g class="event-marker impact" transform="translate(700 486)"><circle r="11"></circle><circle r="6"></circle></g>
+                <g class="event-marker" transform="translate(654 536)"><circle r="9"></circle><circle r="4"></circle></g>
+                <g class="event-marker" transform="translate(614 560)"><circle r="10"></circle><circle r="5"></circle></g>
+                <g class="event-marker impact" transform="translate(570 589)"><circle r="12"></circle><circle r="7"></circle></g>
+                <g class="event-marker" transform="translate(510 514)"><circle r="9"></circle><circle r="4"></circle></g>
+                <g class="event-marker" transform="translate(465 468)"><circle r="10"></circle><circle r="5"></circle></g>
+                <g class="event-marker" transform="translate(414 425)"><circle r="9"></circle><circle r="4"></circle></g>
+                <g class="event-marker impact" transform="translate(351 377)"><circle r="11"></circle><circle r="6"></circle></g>
+                <g class="event-marker" transform="translate(317 322)"><circle r="9"></circle><circle r="4"></circle></g>
+                <g class="event-marker" transform="translate(629 288)"><circle r="9"></circle><circle r="4"></circle></g>
+                <g class="event-marker impact" transform="translate(676 257)"><circle r="11"></circle><circle r="6"></circle></g>
+              </g>
+
+              <g class="cyclone-layer">
+                <path class="cyclone-cone" d="M735 458 C697 417 625 384 548 363 C491 348 438 319 416 270 C440 250 487 244 526 262 C581 287 639 334 750 386Z"></path>
+                <path class="cyclone-track" d="M735 458 C671 427 615 393 559 359 C512 331 470 299 430 267"></path>
+                <g class="cyclone-marker" transform="translate(735 458)"><circle class="outer" r="16"></circle><circle class="inner" r="9"></circle></g>
+                <g class="cyclone-marker" transform="translate(470 300)"><circle class="outer" r="11"></circle><circle class="inner" r="6"></circle></g>
+                <g class="cyclone-marker" transform="translate(357 420)"><circle class="outer" r="12"></circle><circle class="inner" r="7"></circle></g>
+              </g>
+
+              <circle class="edit-radius" id="editRadius" cx="790" cy="345" r="90"></circle>
+
+              <g class="place-dot" data-place="home" transform="translate(335 382)">
+                <circle class="halo" r="9"></circle>
+                <circle class="core" r="4"></circle>
+                <text x="13" y="4">HOME</text>
+              </g>
+              <g class="place-dot" data-place="family" transform="translate(790 345)">
+                <circle class="halo" r="9"></circle>
+                <circle class="core" r="4"></circle>
+                <text x="-13" y="4" text-anchor="end">FAMILY · JAPAN</text>
+              </g>
+              <g class="place-dot" data-place="rennes" transform="translate(526 252)">
+                <circle class="halo" r="9"></circle>
+                <circle class="core" r="4"></circle>
+                <text x="13" y="4">RENNES</text>
+              </g>
+            </g>
+          </svg>
+
+          <article class="map-summary">
+            <div class="summary-main">
+              <div class="summary-badge" id="summaryBadge">M4.7</div>
+              <div class="summary-copy">
+                <div class="summary-title" id="summaryTitle">16 km ENE of Hasaki, Japan</div>
+                <div class="summary-meta" id="summaryMeta">Reviewed · USGS</div>
+              </div>
+              <div class="summary-age" id="summaryAge">5h ago</div>
+            </div>
+            <div class="summary-facts" id="summaryFacts">
+              <div class="summary-fact"><div class="summary-fact-label">DEPTH</div><div class="summary-fact-value">35 km deep</div></div>
+              <div class="summary-fact"><div class="summary-fact-label">MAX SHAKING</div><div class="summary-fact-value">MMI IV</div></div>
+              <div class="summary-fact"><div class="summary-fact-label">FELT REPORTS</div><div class="summary-fact-value">4</div></div>
+            </div>
+          </article>
+
+          <div class="map-legend" id="mapLegend">● SIZE: MAGNITUDE · COLOR: IMPACT · ● WATCHED PLACE</div>
+          <div class="map-instruction">GLOBE · DRAG TO ROTATE</div>
+          <div class="map-tools" aria-label="Map controls">
+            <button type="button" aria-label="Zoom in">+</button>
+            <button type="button" aria-label="Zoom out">−</button>
+            <button type="button" aria-label="Reset globe">◎</button>
+          </div>
+        </section>
+
+        <aside class="sidebar" aria-label="Tracker navigation and details">
+          <section class="panel-view activity-panel" aria-label="Current tracker activity">
+            <header class="module-header">
+              <div class="module-heading-row">
+                <button class="mode-button" id="modeButton" type="button" aria-haspopup="menu" aria-expanded="false">
+                  <span class="mode-glyph" id="modeGlyph">◎</span>
+                  <span id="modeName">EARTHQUAKES</span>
+                  <span class="mode-chevron">⌄</span>
+                </button>
+                <div class="module-count" id="moduleCount">113 IN 7 DAYS</div>
+              </div>
+            </header>
+
+            <div class="mode-menu" id="modeMenu" role="menu" aria-label="Choose tracker" data-open="false">
+              <div class="tracker-menu-intro" role="none">
+                <div class="tracker-menu-title">TRACKERS</div>
+                <p>Choose what the map monitors. This surface can grow as new hazard modules arrive.</p>
+              </div>
+              <div class="tracker-options">
+                <button class="menu-item" type="button" role="menuitem" data-mode="cyclones" aria-current="false">
+                  <span class="tracker-preview cyclones" aria-hidden="true">◉</span>
+                  <span><span class="menu-title">CYCLONES</span><span class="menu-meta">Tracks, forecast cones, and formation outlooks</span></span>
+                  <span class="menu-state">6 ACTIVE</span>
+                </button>
+                <button class="menu-item" type="button" role="menuitem" data-mode="earthquakes" aria-current="true">
+                  <span class="tracker-preview earthquakes" aria-hidden="true">◎</span>
+                  <span><span class="menu-title">EARTHQUAKES</span><span class="menu-meta">Recent events, shaking, depth, and impact</span></span>
+                  <span class="menu-state">113 / 7D</span>
+                </button>
+                <button class="menu-item future" type="button" role="menuitem" disabled>
+                  <span class="tracker-preview future" aria-hidden="true">＋</span>
+                  <span><span class="menu-title">MORE TRACKERS</span><span class="menu-meta">Additional modules fit here without changing the navigation</span></span>
+                  <span class="menu-state">SCALES</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="scope-bar">
+              <button class="scope-button" id="scopeButton" type="button" aria-haspopup="menu" aria-expanded="false">
+                <span>⌖</span><span id="scopeName">WORLDWIDE</span><span>⌄</span>
+              </button>
+              <div class="scope-context" id="scopeContext">ALL MONITORED ACTIVITY</div>
+
+              <div class="scope-menu" id="scopeMenu" role="menu" data-open="false">
+                <div class="menu-label">VIEW ACTIVITY AROUND</div>
+                <button class="menu-item" type="button" role="menuitem" data-scope-choice="worldwide" aria-current="true">
+                  <span class="menu-icon">◎</span>
+                  <span><span class="menu-title">WORLDWIDE</span><span class="menu-meta">All monitored activity</span></span>
+                  <span class="menu-state">DEFAULT</span>
+                </button>
+                <button class="menu-item" type="button" role="menuitem" data-scope-choice="home" aria-current="false">
+                  <span class="menu-icon">●</span>
+                  <span><span class="menu-title">HOME</span><span class="menu-meta">Cancún, Mexico</span></span>
+                  <span class="menu-state">QUIET</span>
+                </button>
+                <button class="menu-item" type="button" role="menuitem" data-scope-choice="family" aria-current="false">
+                  <span class="menu-icon">●</span>
+                  <span><span class="menu-title">FAMILY IN JAPAN</span><span class="menu-meta">Hasaki, Japan</span></span>
+                  <span class="menu-state">1 UPDATE</span>
+                </button>
+                <button class="menu-item" type="button" role="menuitem" data-scope-choice="rennes" aria-current="false">
+                  <span class="menu-icon">●</span>
+                  <span><span class="menu-title">RENNES</span><span class="menu-meta">Brittany, France</span></span>
+                  <span class="menu-state">QUIET</span>
+                </button>
+                <div class="scope-actions">
+                  <button type="button" data-edit-place="new">＋ ADD PLACE</button>
+                  <button type="button" id="manageFromScope">MANAGE ALERTS</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-heading">
+              <span id="sectionLabel">PAST 24 HOURS</span>
+              <span id="sectionCount">14</span>
+            </div>
+            <div class="event-list" id="eventList"></div>
+            <div class="event-details">
+              <div class="details-label">EVENT DETAILS</div>
+              <div class="details-text" id="detailsText">USGS reports a reviewed earthquake at 35 km depth. Maximum shaking: MMI IV reported. Felt reports: 4.</div>
+              <a class="details-link" href="#official" id="detailsLink">◈ USGS EVENT</a>
+            </div>
+          </section>
+
+          <section class="panel-view alerts-panel" id="alertsPanel" aria-label="Watch alerts">
+            <header class="subview-header">
+              <button class="back-button" id="closeAlerts" type="button">‹ BACK TO ACTIVITY</button>
+              <div class="subview-heading-row">
+                <div class="subview-title">WATCH ALERTS</div>
+                <div class="subview-count">3 LOCATIONS</div>
+              </div>
+            </header>
+            <div class="subview-summary">
+              <strong>1 NEW UPDATE</strong>
+              <p>Locations stay quiet until monitored activity crosses one of their alert rules. Dots remain visible on the map; alert areas appear only while editing.</p>
+            </div>
+            <div class="place-list">
+              <button class="place-row" type="button" data-edit-place="home">
+                <span class="place-row-head"><span class="place-name">HOME</span><span class="place-status">QUIET</span></span>
+                <span class="place-location">Cancún, Mexico</span>
+                <span class="place-rules"><span>Cyclones: cone or formation within 500 km</span><span>Earthquakes: M4.5+ within 300 km</span></span>
+              </button>
+              <button class="place-row has-update" type="button" data-edit-place="family">
+                <span class="place-row-head"><span class="place-name">FAMILY IN JAPAN</span><span class="place-status update">1 UPDATE</span></span>
+                <span class="place-location">Hasaki, Japan</span>
+                <span class="place-rules"><span>M4.7 event reported nearby, review details</span><span>Cyclones: cone or formation within 500 km</span></span>
+              </button>
+              <button class="place-row" type="button" data-edit-place="rennes">
+                <span class="place-row-head"><span class="place-name">RENNES</span><span class="place-status">QUIET</span></span>
+                <span class="place-location">Brittany, France</span>
+                <span class="place-rules"><span>Cyclones: cone or formation within 750 km</span><span>Earthquakes: M4.5+ within 300 km</span></span>
+              </button>
+            </div>
+            <button class="primary-action" type="button" data-edit-place="new">＋ ADD WATCHED LOCATION</button>
+          </section>
+
+          <section class="panel-view edit-panel" aria-label="Edit a watched location">
+            <header class="subview-header">
+              <button class="back-button" id="cancelEditTop" type="button">‹ WATCH ALERTS</button>
+              <div class="subview-heading-row">
+                <div class="subview-title" id="editTitle">EDIT LOCATION</div>
+                <div class="subview-count">AREA VISIBLE</div>
+              </div>
+            </header>
+            <form class="edit-form" id="placeForm">
+              <div class="field">
+                <label for="placeName">LOCATION NAME</label>
+                <input id="placeName" name="placeName" value="Family in Japan" autocomplete="off" aria-label="Location name">
+              </div>
+              <div class="field">
+                <label for="placePosition">MAP POSITION</label>
+                <input id="placePosition" name="placePosition" value="35.74° N, 140.83° E" readonly aria-label="Map position">
+                <div class="field-help">Click elsewhere on the map to adjust the watched location. Alert areas are shown only during this edit step.</div>
+              </div>
+
+              <div class="rules-heading">PROACTIVE ALERT RULES</div>
+              <div class="rule-card">
+                <div class="rule-card-head">
+                  <span>CYCLONES</span>
+                  <label class="switch"><input type="checkbox" checked aria-label="Enable cyclone alerts"><span></span></label>
+                </div>
+                <div class="rule-grid">
+                  <label>WITHIN<select aria-label="Cyclone alert distance"><option>500 km</option><option>250 km</option><option>750 km</option></select></label>
+                  <label>FORMATION<select aria-label="Cyclone formation threshold"><option>40%+</option><option>20%+</option><option>70%+</option></select></label>
+                </div>
+              </div>
+              <div class="rule-card">
+                <div class="rule-card-head">
+                  <span>EARTHQUAKES</span>
+                  <label class="switch"><input type="checkbox" checked aria-label="Enable earthquake alerts"><span></span></label>
+                </div>
+                <div class="rule-grid">
+                  <label>WITHIN<select aria-label="Earthquake alert distance"><option>300 km</option><option>100 km</option><option>500 km</option></select></label>
+                  <label>MAGNITUDE<select aria-label="Earthquake magnitude threshold"><option>M4.5+</option><option>M3.5+</option><option>M5.5+</option></select></label>
+                </div>
+              </div>
+            </form>
+            <div class="form-actions">
+              <button type="button" id="cancelEdit">CANCEL</button>
+              <button class="save" type="submit" form="placeForm">SAVE ALERTS</button>
+            </div>
+          </section>
+
+          <footer class="sidebar-utilities" aria-label="Data status and utilities">
+            <div class="sidebar-data-health" title="All configured feeds are responding">
+              <span>DATA LIVE</span><span class="feed-count">2 FEEDS</span>
+            </div>
+            <div class="sidebar-utility-actions">
+              <button class="sidebar-utility-button" type="button" aria-label="Refresh data" title="Refresh data">↻</button>
+              <button class="sidebar-utility-button" type="button" aria-label="View data sources" title="View data sources">◈</button>
+            </div>
+          </footer>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const app = document.querySelector("#app");
+    const studyDescription = document.querySelector("#studyDescription");
+    const modeButton = document.querySelector("#modeButton");
+    const modeMenu = document.querySelector("#modeMenu");
+    const scopeButton = document.querySelector("#scopeButton");
+    const scopeMenu = document.querySelector("#scopeMenu");
+    const placeDots = [...document.querySelectorAll(".place-dot")];
+    const trackerCoveredContent = [...document.querySelectorAll(".scope-bar, .section-heading, .event-list, .event-details")];
+
+    const hazardData = {
+      earthquakes: {
+        name: "EARTHQUAKES",
+        glyph: "◎",
+        count: "113 IN 7 DAYS",
+        source: "USGS",
+        section: "PAST 24 HOURS",
+        sectionCount: "14",
+        legend: "● SIZE: MAGNITUDE · COLOR: IMPACT · ● WATCHED PLACE",
+        details: "USGS reports a reviewed earthquake at 35 km depth. Maximum shaking: MMI IV reported. Felt reports: 4.",
+        link: "◈ USGS EVENT",
+        summary: {
+          badge: "M4.7",
+          title: "16 km ENE of Hasaki, Japan",
+          meta: "Reviewed · USGS",
+          age: "5h ago",
+          facts: [["DEPTH", "35 km deep"], ["MAX SHAKING", "MMI IV"], ["FELT REPORTS", "4"]]
+        },
+        events: [
+          ["M4.7", "16 km ENE of Hasaki, Japan", "Reviewed · 35 km deep · 5h ago"],
+          ["M4.8", "184 km SE of Perryville, Alaska", "Reviewed · 5 km deep · 5h ago"],
+          ["M4.5", "24 km WSW of Sipi, Colombia", "Reviewed · 58 km deep · 9h ago"],
+          ["M4.7", "25 km ESE of Lospalos, Timor Leste", "Reviewed · 10 km deep · 11h ago"],
+          ["M5.0", "64 km W of Labuha, Indonesia", "Reviewed · 42 km deep · 12h ago"],
+          ["M4.9", "South Sandwich Islands region", "Reviewed · 90 km deep · 13h ago"],
+          ["M4.8", "29 km ENE of Pilar, Philippines", "Reviewed · 61 km deep · 13h ago"]
+        ]
+      },
+      cyclones: {
+        name: "CYCLONES",
+        glyph: "◉",
+        count: "6 TRACKED",
+        source: "NHC",
+        section: "ACTIVE SYSTEMS",
+        sectionCount: "6",
+        legend: "▭ FORECAST CONE · ┄ CENTER TRACK · ● WATCHED PLACE",
+        details: "NHC reports Tropical Storm Karina moving northwest. Forecast guidance shows the center track and uncertainty cone over the next five days.",
+        link: "◈ NHC ADVISORY",
+        summary: {
+          badge: "TS",
+          title: "Karina",
+          meta: "Tropical storm · Advisory 8",
+          age: "5h ago",
+          facts: [["MAX WIND", "65 mph"], ["PRESSURE", "989 mb"], ["MOVEMENT", "NW at 12 mph"]]
+        },
+        events: [
+          ["TS", "Karina", "Tropical storm · 65 mph · Advisory 8"],
+          ["TS", "Lowell", "Tropical storm · 45 mph · Advisory 4"],
+          ["90%", "Well offshore of southwestern Mexico", "40% in 2 days · 90% in 7 days"],
+          ["40%", "Central Atlantic disturbance", "20% in 2 days · 40% in 7 days"],
+          ["20%", "Central Pacific disturbance", "Near-term formation chance low"],
+          ["LO", "Eastern Atlantic wave", "Monitoring for gradual development"]
+        ]
+      }
+    };
+
+    const scopes = {
+      worldwide: { name: "WORLDWIDE", context: "ALL MONITORED ACTIVITY", section: null, count: null },
+      home: { name: "HOME", context: "CANCÚN · ALERTS ON", section: "NEAR HOME", count: "0" },
+      family: { name: "FAMILY IN JAPAN", context: "HASAKI · 1 UPDATE", section: "NEAR FAMILY IN JAPAN", count: "1" },
+      rennes: { name: "RENNES", context: "BRITTANY · ALERTS ON", section: "NEAR RENNES", count: "0" }
+    };
+
+    const placePositions = {
+      home: { x: 335, y: 382, name: "Home", position: "21.16° N, 86.85° W" },
+      family: { x: 790, y: 345, name: "Family in Japan", position: "35.74° N, 140.83° E" },
+      rennes: { x: 526, y: 252, name: "Rennes", position: "48.12° N, 1.68° W" },
+      new: { x: 606, y: 420, name: "New watched location", position: "Select a point on the map" }
+    };
+
+    function setModeMenuOpen(open) {
+      modeMenu.dataset.open = String(open);
+      modeButton.setAttribute("aria-expanded", String(open));
+      trackerCoveredContent.forEach(element => {
+        element.inert = open;
+        if (open) element.setAttribute("aria-hidden", "true");
+        else element.removeAttribute("aria-hidden");
+      });
+    }
+
+    function closeMenus() {
+      setModeMenuOpen(false);
+      scopeMenu.dataset.open = "false";
+      scopeButton.setAttribute("aria-expanded", "false");
+    }
+
+    function renderEvents() {
+      const hazard = hazardData[app.dataset.hazard];
+      const scope = scopes[app.dataset.scope];
+      let events = hazard.events;
+      if (app.dataset.scope === "family" && app.dataset.hazard === "earthquakes") events = [hazard.events[0]];
+      if (app.dataset.scope !== "worldwide" && !(app.dataset.scope === "family" && app.dataset.hazard === "earthquakes")) events = [];
+
+      document.querySelector("#eventList").innerHTML = events.length
+        ? events.map((event, index) => `
+          <button class="event-row" type="button" aria-current="${index === 0}">
+            <span class="event-badge">${event[0]}</span>
+            <span class="event-copy"><span class="event-name">${event[1]}</span><span class="event-meta">${event[2]}</span></span>
+          </button>`).join("")
+        : `<div style="padding:28px 16px;text-align:center;color:var(--muted);font-size:9px;line-height:1.6">NO MONITORED ${hazard.name}<br>CURRENTLY MATCH THIS LOCATION</div>`;
+
+      document.querySelector("#sectionLabel").textContent = scope.section || hazard.section;
+      document.querySelector("#sectionCount").textContent = scope.count ?? hazard.sectionCount;
+    }
+
+    function renderHazard() {
+      const hazard = hazardData[app.dataset.hazard];
+      document.querySelector("#modeName").textContent = hazard.name;
+      document.querySelector("#modeGlyph").textContent = hazard.glyph;
+      document.querySelector("#moduleCount").textContent = hazard.count;
+      document.querySelector("#mapLegend").textContent = hazard.legend;
+      document.querySelector("#detailsText").textContent = hazard.details;
+      document.querySelector("#detailsLink").textContent = hazard.link;
+      document.querySelector("#summaryBadge").textContent = hazard.summary.badge;
+      document.querySelector("#summaryTitle").textContent = hazard.summary.title;
+      document.querySelector("#summaryMeta").textContent = hazard.summary.meta;
+      document.querySelector("#summaryAge").textContent = hazard.summary.age;
+      document.querySelector("#summaryFacts").innerHTML = hazard.summary.facts.map(fact => `
+        <div class="summary-fact"><div class="summary-fact-label">${fact[0]}</div><div class="summary-fact-value">${fact[1]}</div></div>`).join("");
+      document.querySelectorAll("[data-mode]").forEach(item => item.setAttribute("aria-current", String(item.dataset.mode === app.dataset.hazard)));
+      renderEvents();
+    }
+
+    function renderScope() {
+      const scope = scopes[app.dataset.scope];
+      document.querySelector("#scopeName").textContent = scope.name;
+      document.querySelector("#scopeContext").textContent = scope.context;
+      document.querySelectorAll("[data-scope-choice]").forEach(item => item.setAttribute("aria-current", String(item.dataset.scopeChoice === app.dataset.scope)));
+      placeDots.forEach(dot => dot.classList.toggle("selected", dot.dataset.place === app.dataset.scope));
+      renderEvents();
+    }
+
+    function setConcept(concept) {
+      app.dataset.concept = concept;
+      app.dataset.view = "activity";
+      app.dataset.scope = "worldwide";
+      document.querySelectorAll("[data-concept-choice]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.conceptChoice === concept)));
+      studyDescription.textContent = concept === "alerts"
+        ? "The tracker title owns module switching; WATCH ALERTS opens one cross-hazard destination."
+        : "The tracker title still owns modules; a second selector uses watched locations as a data scope.";
+      closeMenus();
+      renderScope();
+    }
+
+    function openAlerts() {
+      app.dataset.view = "alerts";
+      app.dataset.scope = "worldwide";
+      document.querySelector("#openAlerts").setAttribute("aria-pressed", "true");
+      placeDots.forEach(dot => dot.classList.remove("selected"));
+      closeMenus();
+    }
+
+    function openEditor(placeId) {
+      const place = placePositions[placeId] || placePositions.new;
+      const selectedId = placePositions[placeId] ? placeId : "new";
+      app.dataset.view = "edit";
+      document.querySelector("#editTitle").textContent = selectedId === "new" ? "ADD WATCHED LOCATION" : "EDIT LOCATION";
+      document.querySelector("#placeName").value = place.name;
+      document.querySelector("#placePosition").value = place.position;
+      document.querySelector("#editRadius").setAttribute("cx", String(place.x));
+      document.querySelector("#editRadius").setAttribute("cy", String(place.y));
+      placeDots.forEach(dot => dot.classList.toggle("selected", dot.dataset.place === selectedId));
+      closeMenus();
+    }
+
+    document.querySelectorAll("[data-concept-choice]").forEach(button => {
+      button.addEventListener("click", () => setConcept(button.dataset.conceptChoice));
+    });
+
+    modeButton.addEventListener("click", event => {
+      event.stopPropagation();
+      const willOpen = modeMenu.dataset.open !== "true";
+      closeMenus();
+      setModeMenuOpen(willOpen);
+    });
+
+    modeMenu.addEventListener("click", event => event.stopPropagation());
+
+    document.querySelectorAll("[data-mode]").forEach(item => {
+      item.addEventListener("click", () => {
+        app.dataset.hazard = item.dataset.mode;
+        closeMenus();
+        renderHazard();
+        modeButton.focus({ preventScroll: true });
+      });
+    });
+
+    scopeButton.addEventListener("click", event => {
+      event.stopPropagation();
+      const willOpen = scopeMenu.dataset.open !== "true";
+      closeMenus();
+      scopeMenu.dataset.open = String(willOpen);
+      scopeButton.setAttribute("aria-expanded", String(willOpen));
+    });
+
+    scopeMenu.addEventListener("click", event => event.stopPropagation());
+
+    document.querySelectorAll("[data-scope-choice]").forEach(item => {
+      item.addEventListener("click", () => {
+        app.dataset.scope = item.dataset.scopeChoice;
+        closeMenus();
+        renderScope();
+      });
+    });
+
+    document.querySelector("#openAlerts").addEventListener("click", openAlerts);
+    document.querySelector("#manageFromScope").addEventListener("click", openAlerts);
+    document.querySelector("#closeAlerts").addEventListener("click", () => {
+      app.dataset.view = "activity";
+      document.querySelector("#openAlerts").setAttribute("aria-pressed", "false");
+      renderScope();
+    });
+
+    document.querySelectorAll("[data-edit-place]").forEach(button => {
+      button.addEventListener("click", () => openEditor(button.dataset.editPlace));
+    });
+
+    function cancelEditor() {
+      app.dataset.view = "alerts";
+      placeDots.forEach(dot => dot.classList.remove("selected"));
+    }
+
+    document.querySelector("#cancelEdit").addEventListener("click", cancelEditor);
+    document.querySelector("#cancelEditTop").addEventListener("click", cancelEditor);
+    document.querySelector("#placeForm").addEventListener("submit", event => {
+      event.preventDefault();
+      cancelEditor();
+    });
+
+    document.addEventListener("click", closeMenus);
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      if (modeMenu.dataset.open === "true") {
+        closeMenus();
+        modeButton.focus({ preventScroll: true });
+      }
+      else if (scopeMenu.dataset.open === "true") closeMenus();
+      else if (app.dataset.view === "edit") cancelEditor();
+      else if (app.dataset.view === "alerts") {
+        app.dataset.view = "activity";
+        renderScope();
+      }
+    });
+
+    renderHazard();
+    renderScope();
+  </script>
+</body>
+</html>

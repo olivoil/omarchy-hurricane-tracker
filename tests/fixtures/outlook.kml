@@ -30,5 +30,11 @@
         <Data name="Discussion"><value>1. East of the Leeward Islands (Remnants of Dolly): A tropical wave, the remnants of Tropical Storm Dolly, is moving westward. Formation chance through 48 hours...low...near 0 percent. Formation chance through 7 days...low...10 percent.</value></Data>
       </ExtendedData>
     </Placemark>
+    <Placemark>
+      <styleUrl>#1</styleUrl>
+      <LineString><coordinates>
+        -51.7,16.3,0 -59.0,17.4,0 -67.0,19.0,0
+      </coordinates></LineString>
+    </Placemark>
   </Document>
 </kml>

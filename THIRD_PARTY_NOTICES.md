@@ -17,3 +17,18 @@ used only to identify the source. They do not imply endorsement of Hurricane Tra
 NHC notes that its GIS feeds are experimental conveniences, may not always be
 available or timely, and must not be relied upon for life-threatening
 decisions. See <https://www.nhc.noaa.gov/gis/>.
+
+## Open-Meteo and GeoNames place data
+
+Optional typed location search uses Open-Meteo's Geocoding API. Open-Meteo's
+location results are based on GeoNames data. See
+<https://open-meteo.com/en/docs/geocoding-api> and
+<https://www.geonames.org/>.
+
+## OpenStreetMap and Nominatim place data
+
+Optional naming of points selected directly on the map uses the public
+Nominatim reverse-geocoding service. Place data is © OpenStreetMap contributors
+and available under the Open Data Commons Open Database License (ODbL).
+See <https://www.openstreetmap.org/copyright> and
+<https://operations.osmfoundation.org/policies/nominatim/>.

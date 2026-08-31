@@ -18,10 +18,13 @@ import json
 import math
 import os
 from pathlib import Path
+import pwd
 import re
 import sys
 import tempfile
 from typing import Any, Callable, Iterable
+import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -36,6 +39,10 @@ OUTLOOK_URLS = {
     "ep": "https://www.nhc.noaa.gov/xgtwo/gtwo_pac.kmz",
     "cp": "https://www.nhc.noaa.gov/xgtwo/gtwo_cpac.kmz",
 }
+OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+OPEN_METEO_GEOCODING_HOST = "geocoding-api.open-meteo.com"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+NOMINATIM_REVERSE_HOST = "nominatim.openstreetmap.org"
 ALLOWED_HOSTS = frozenset(
     {
         "nhc.noaa.gov",
@@ -49,11 +56,19 @@ MAX_KMZ_BYTES = 10_000_000
 MAX_KML_BYTES = 18_000_000
 MAX_TEXT_BYTES = 750_000
 MAX_CACHE_BYTES = 8_000_000
+MAX_WATCH_CONFIG_BYTES = 64_000
+MAX_OPEN_METEO_RESPONSE_BYTES = 64 * 1024
+MAX_NOMINATIM_RESPONSE_BYTES = 64 * 1024
 MAX_STORMS = 20
 MAX_OUTLOOKS = 24
+MAX_WATCH_PLACES = 12
+MAX_PLACE_SEARCH_RESULTS = 8
+MAX_PLACE_SEARCH_QUERY_CHARS = 120
+MAX_REMOTE_DISPLAY_FIELD_CHARS = 256
 MAX_TRACK_POINTS = 40
 MAX_PAST_POINTS = 256
 MAX_CONE_POINTS = 420
+MAX_CONNECTOR_POINTS = 96
 USER_AGENT = f"HurricaneTracker/{VERSION} (+https://github.com/olivoil/omarchy-hurricane-tracker)"
 
 CLASSIFICATION_LABELS = {
@@ -81,7 +96,17 @@ BASIN_LABELS = {
 
 
 class DataError(RuntimeError):
-    """A bounded, user-safe failure while loading remote cyclone data."""
+    """A bounded, user-safe failure while loading external or saved data."""
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect so fixed API requests cannot change origin."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+DIRECT_OPENER = urllib.request.build_opener(NoRedirectHandler())
 
 
 def utc_now() -> str:
@@ -90,13 +115,40 @@ def utc_now() -> str:
     )
 
 
+def home_directory() -> Path:
+    configured = os.environ.get("HOME")
+    if configured:
+        candidate = Path(configured)
+        if candidate.is_absolute():
+            return candidate
+    try:
+        candidate = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (KeyError, OSError, TypeError) as error:
+        raise DataError("User home directory is unavailable") from error
+    if not candidate.is_absolute():
+        raise DataError("User home directory is unavailable")
+    return candidate
+
+
+def xdg_base_path(environment_name: str, fallback_directory: str) -> Path:
+    configured = os.environ.get(environment_name)
+    if configured:
+        candidate = Path(configured)
+        if candidate.is_absolute():
+            return candidate
+    return home_directory() / fallback_directory
+
+
 def cache_path() -> Path:
-    root = Path(
-        os.environ.get(
-            "XDG_CACHE_HOME", str(Path(os.environ.get("HOME", ".")) / ".cache")
-        )
+    return xdg_base_path("XDG_CACHE_HOME", ".cache") / "hurricane-tracker" / "storms.json"
+
+
+def watch_config_path() -> Path:
+    return (
+        xdg_base_path("XDG_CONFIG_HOME", ".config")
+        / "hurricane-tracker"
+        / "watch-places.json"
     )
-    return root / "hurricane-tracker" / "storms.json"
 
 
 def safe_text(value: Any, limit: int = 160) -> str:
@@ -149,39 +201,475 @@ def is_safe_url(url: str) -> bool:
     )
 
 
+def is_open_meteo_geocoding_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == OPEN_METEO_GEOCODING_HOST
+        and parsed.path == "/v1/search"
+        and port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment
+    )
+
+
+def is_nominatim_reverse_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+        port = parsed.port
+        parameters = urllib.parse.parse_qs(
+            parsed.query, keep_blank_values=True, strict_parsing=True
+        )
+        required_keys = {
+            "format",
+            "lat",
+            "lon",
+            "zoom",
+            "addressdetails",
+            "layer",
+            "accept-language",
+        }
+        if set(parameters) != required_keys or any(
+            len(values) != 1 for values in parameters.values()
+        ):
+            return False
+        latitude = float(parameters.get("lat", [""])[0])
+        longitude = float(parameters.get("lon", [""])[0])
+    except (ValueError, TypeError):
+        return False
+    expected = {
+        "format": ["jsonv2"],
+        "lat": parameters.get("lat", []),
+        "lon": parameters.get("lon", []),
+        "zoom": ["10"],
+        "addressdetails": ["1"],
+        "layer": ["address"],
+        "accept-language": ["en"],
+    }
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == NOMINATIM_REVERSE_HOST
+        and parsed.path == "/reverse"
+        and port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment
+        and parameters == expected
+        and math.isfinite(latitude)
+        and math.isfinite(longitude)
+        and -90 <= latitude <= 90
+        and -180 <= longitude <= 180
+    )
+
+
+def response_header(response: Any, name: str) -> str:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        return str(headers.get(name, "") or "")
+    except (AttributeError, TypeError):
+        return ""
+
+
+def read_bounded_response(
+    response: Any,
+    maximum: int,
+    provider: str,
+    require_json: bool = False,
+) -> bytes:
+    try:
+        status_value = getattr(response, "status", None)
+        if status_value is None:
+            status_value = response.getcode()
+        status = int(status_value)
+    except (AttributeError, TypeError, ValueError):
+        raise DataError(f"{provider} response did not include a valid status")
+    if not 200 <= status < 300:
+        raise DataError(f"{provider} returned a non-success response")
+
+    if require_json:
+        content_type = response_header(response, "Content-Type").split(";", 1)[0].strip().lower()
+        if content_type not in {"application/json", "application/geo+json"}:
+            raise DataError(f"{provider} response was not JSON")
+
+    declared_length = response_header(response, "Content-Length").strip()
+    if declared_length:
+        try:
+            if int(declared_length) > maximum:
+                raise DataError(f"{provider} response exceeded the size limit")
+        except ValueError:
+            # A missing, malformed, or understated header never replaces the
+            # streaming limit below.
+            pass
+
+    data = response.read(maximum + 1)
+    if len(data) > maximum:
+        raise DataError(f"{provider} response exceeded the size limit")
+    return data
+
+
+def fetch_direct_bytes(
+    url: str,
+    maximum: int,
+    url_validator: Callable[[str], bool],
+    provider: str,
+    accept: str,
+    timeout: float,
+    require_json: bool = False,
+    opener: Any = DIRECT_OPENER,
+) -> bytes:
+    if not url_validator(url):
+        raise DataError(f"remote URL is outside the {provider} allowlist")
+
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": accept},
+    )
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            final_url = str(response.geturl())
+            if final_url != url or not url_validator(final_url):
+                raise DataError(f"{provider} response attempted to redirect")
+            return read_bounded_response(response, maximum, provider, require_json)
+    except DataError:
+        raise
+    except urllib.error.HTTPError as error:
+        status = int(error.code or 0)
+        error.close()
+        if 300 <= status < 400:
+            raise DataError(f"{provider} response attempted to redirect") from error
+        raise DataError(f"{provider} returned a non-success response") from error
+    except Exception as error:
+        raise DataError(f"{provider} request failed") from error
+
+
 def safe_remote_url(value: Any) -> str:
     url = safe_text(value, 2048)
     return url if is_safe_url(url) else ""
 
 
 def fetch_bytes(url: str, maximum: int, timeout: int = 18) -> bytes:
-    if not is_safe_url(url):
-        raise DataError("remote URL is outside the NHC host allowlist")
-
-    request = urllib.request.Request(
+    return fetch_direct_bytes(
         url,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/json, application/vnd.google-earth.kmz, application/xml;q=0.9, */*;q=0.2",
-        },
+        maximum,
+        is_safe_url,
+        "NHC",
+        "application/json, application/vnd.google-earth.kmz, application/xml;q=0.9, */*;q=0.2",
+        timeout,
+    )
+
+
+def normalize_place_query(value: Any) -> str:
+    if not isinstance(value, str):
+        raise DataError("place search needs a text query")
+    if any(unicodedata.category(character) == "Cc" for character in value):
+        raise DataError("place search query contained control characters")
+    query = " ".join(value.split())
+    if len(query) < 2:
+        raise DataError("place search query is too short")
+    if len(query) > MAX_PLACE_SEARCH_QUERY_CHARS or len(query.encode("utf-8")) > 512:
+        raise DataError("place search query is too long")
+    return query
+
+
+def open_meteo_geocoding_url(query: str) -> str:
+    normalized = normalize_place_query(query)
+    parameters = urllib.parse.urlencode(
+        {
+            "name": normalized,
+            "count": MAX_PLACE_SEARCH_RESULTS,
+            "language": "en",
+            "format": "json",
+        }
+    )
+    return f"{OPEN_METEO_GEOCODING_URL}?{parameters}"
+
+
+def remote_display_text(value: Any, required: bool = False) -> str | None:
+    if value is None:
+        return None if required else ""
+    if not isinstance(value, str):
+        return None
+    if len(value) > MAX_REMOTE_DISPLAY_FIELD_CHARS:
+        return None
+    if any(
+        unicodedata.category(character) == "Cc" or character in "<>"
+        for character in value
+    ):
+        return None
+    normalized = " ".join(value.split())
+    if required and not normalized:
+        return None
+    return normalized
+
+
+def place_kind(feature_code: str) -> str:
+    code = feature_code.upper()
+    if code == "PPLC":
+        return "Capital"
+    if code.startswith("PPLA") or code in {"PPL", "PPLG", "PPLL"}:
+        return "City"
+    if code.startswith("PPL"):
+        return "Community"
+    if code.startswith("ADM"):
+        return "Region"
+    if code.startswith("ISL"):
+        return "Island"
+    if code.startswith("AIR"):
+        return "Airport"
+    return "Place"
+
+
+def normalized_place_search_result(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    name = remote_display_text(value.get("name"), required=True)
+    admin1 = remote_display_text(value.get("admin1"))
+    country = remote_display_text(value.get("country"))
+    feature_code = remote_display_text(value.get("feature_code"))
+    if name is None or admin1 is None or country is None or feature_code is None:
+        return None
+    if feature_code and not re.fullmatch(r"[A-Za-z0-9_-]{1,24}", feature_code):
+        return None
+
+    latitude_value = value.get("latitude")
+    longitude_value = value.get("longitude")
+    if (
+        isinstance(latitude_value, bool)
+        or not isinstance(latitude_value, (int, float))
+        or isinstance(longitude_value, bool)
+        or not isinstance(longitude_value, (int, float))
+    ):
+        return None
+    latitude = float(latitude_value)
+    longitude = float(longitude_value)
+    if (
+        not math.isfinite(latitude)
+        or not math.isfinite(longitude)
+        or not -90 <= latitude <= 90
+        or not -180 <= longitude <= 180
+    ):
+        return None
+
+    context_parts = []
+    seen = {name.casefold()}
+    for part in (admin1, country):
+        folded = part.casefold()
+        if part and folded not in seen:
+            seen.add(folded)
+            context_parts.append(part)
+
+    identifier_value = value.get("id")
+    identifier = ""
+    if (
+        isinstance(identifier_value, int)
+        and not isinstance(identifier_value, bool)
+        and 0 <= identifier_value <= 9_999_999_999
+    ):
+        identifier = str(identifier_value)
+    if not identifier:
+        identifier = f"{latitude:.5f}:{longitude:.5f}"
+
+    return {
+        "id": f"open-meteo:{identifier}",
+        "name": name,
+        "context": ", ".join(context_parts),
+        "kind": place_kind(feature_code),
+        "latitude": round(latitude, 5),
+        "longitude": round(longitude, 5),
+    }
+
+
+def normalize_place_search_payload(query: str, value: Any) -> dict[str, Any]:
+    normalized_query = normalize_place_query(query)
+    if not isinstance(value, dict):
+        raise DataError("Open-Meteo response was not an object")
+    if value.get("error") is True:
+        raise DataError("Open-Meteo rejected the place search")
+    rows = value.get("results", [])
+    if not isinstance(rows, list):
+        raise DataError("Open-Meteo response did not contain a result list")
+
+    results = []
+    for row in rows[:MAX_PLACE_SEARCH_RESULTS]:
+        result = normalized_place_search_result(row)
+        if result is not None:
+            results.append(result)
+        if len(results) >= MAX_PLACE_SEARCH_RESULTS:
+            break
+    return {
+        "schemaVersion": 1,
+        "provider": "open-meteo-geonames",
+        "query": normalized_query,
+        "results": results,
+    }
+
+
+def fetch_place_search_json(query: str, opener: Any = DIRECT_OPENER) -> Any:
+    url = open_meteo_geocoding_url(query)
+    raw = fetch_direct_bytes(
+        url,
+        MAX_OPEN_METEO_RESPONSE_BYTES,
+        is_open_meteo_geocoding_url,
+        "Open-Meteo",
+        "application/json",
+        5,
+        require_json=True,
+        opener=opener,
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            final_url = response.geturl()
-            if not is_safe_url(final_url):
-                raise DataError("NHC response redirected outside the host allowlist")
-            length = number(response.headers.get("Content-Length"))
-            if length is not None and length > maximum:
-                raise DataError("NHC response exceeded the size limit")
-            data = response.read(maximum + 1)
-    except DataError:
-        raise
-    except Exception as error:
-        raise DataError("NHC request failed") from error
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DataError("Open-Meteo response was not valid JSON") from error
 
-    if len(data) > maximum:
-        raise DataError("NHC response exceeded the size limit")
-    return data
+
+def search_places(
+    query: str,
+    fetcher: Callable[[str], Any] = fetch_place_search_json,
+) -> dict[str, Any]:
+    normalized_query = normalize_place_query(query)
+    return normalize_place_search_payload(normalized_query, fetcher(normalized_query))
+
+
+def normalized_reverse_coordinate(value: Any, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool):
+        raise DataError("reverse geocoding received an invalid coordinate")
+    coordinate = number(value)
+    if coordinate is None or not minimum <= coordinate <= maximum:
+        raise DataError("reverse geocoding received an invalid coordinate")
+    return float(coordinate)
+
+
+def nominatim_reverse_url(latitude: Any, longitude: Any) -> str:
+    latitude_value = normalized_reverse_coordinate(latitude, -90, 90)
+    longitude_value = normalized_reverse_coordinate(longitude, -180, 180)
+    parameters = urllib.parse.urlencode(
+        {
+            "format": "jsonv2",
+            "lat": f"{latitude_value:.5f}",
+            "lon": f"{longitude_value:.5f}",
+            "zoom": "10",
+            "addressdetails": "1",
+            "layer": "address",
+            "accept-language": "en",
+        }
+    )
+    return f"{NOMINATIM_REVERSE_URL}?{parameters}"
+
+
+def normalize_reverse_geocode_payload(
+    latitude: Any, longitude: Any, value: Any
+) -> dict[str, Any]:
+    latitude_value = normalized_reverse_coordinate(latitude, -90, 90)
+    longitude_value = normalized_reverse_coordinate(longitude, -180, 180)
+    if not isinstance(value, dict):
+        raise DataError("Nominatim response was not an object")
+    if value.get("error"):
+        raise DataError("Nominatim could not identify this location")
+
+    address = value.get("address", {})
+    if not isinstance(address, dict):
+        raise DataError("Nominatim response did not contain an address")
+    raw_fields = {
+        "name": value.get("name"),
+        "display_name": value.get("display_name"),
+        "city": address.get("city"),
+        "town": address.get("town"),
+        "village": address.get("village"),
+        "municipality": address.get("municipality"),
+        "hamlet": address.get("hamlet"),
+        "suburb": address.get("suburb"),
+        "county": address.get("county"),
+        "state": address.get("state"),
+        "country": address.get("country"),
+    }
+    fields: dict[str, str] = {}
+    for key, raw in raw_fields.items():
+        text = remote_display_text(raw)
+        if raw is not None and text is None:
+            raise DataError("Nominatim response contained unsafe display text")
+        fields[key] = text or ""
+
+    name = next(
+        (
+            fields[key]
+            for key in (
+                "city",
+                "town",
+                "village",
+                "municipality",
+                "hamlet",
+                "suburb",
+                "county",
+                "name",
+                "state",
+                "country",
+            )
+            if fields[key]
+        ),
+        "",
+    )
+    if not name and fields["display_name"]:
+        name = fields["display_name"].split(",", 1)[0].strip()
+    if not name:
+        raise DataError("Nominatim did not return a usable place name")
+
+    context_parts = []
+    seen = {name.casefold()}
+    for part in (fields["state"], fields["country"]):
+        folded = part.casefold()
+        if part and folded not in seen:
+            seen.add(folded)
+            context_parts.append(part)
+    return {
+        "schemaVersion": 1,
+        "provider": "nominatim-openstreetmap",
+        "latitude": round(latitude_value, 5),
+        "longitude": round(longitude_value, 5),
+        "name": name,
+        "context": ", ".join(context_parts),
+    }
+
+
+def fetch_reverse_geocode_json(
+    latitude: Any, longitude: Any, opener: Any = DIRECT_OPENER
+) -> Any:
+    url = nominatim_reverse_url(latitude, longitude)
+    raw = fetch_direct_bytes(
+        url,
+        MAX_NOMINATIM_RESPONSE_BYTES,
+        is_nominatim_reverse_url,
+        "Nominatim",
+        "application/json",
+        5,
+        require_json=True,
+        opener=opener,
+    )
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DataError("Nominatim response was not valid JSON") from error
+
+
+def reverse_geocode_place(
+    latitude: Any,
+    longitude: Any,
+    fetcher: Callable[[float, float], Any] = fetch_reverse_geocode_json,
+) -> dict[str, Any]:
+    latitude_value = normalized_reverse_coordinate(latitude, -90, 90)
+    longitude_value = normalized_reverse_coordinate(longitude, -180, 180)
+    return normalize_reverse_geocode_payload(
+        latitude_value,
+        longitude_value,
+        fetcher(latitude_value, longitude_value),
+    )
 
 
 def local_name(tag: str) -> str:
@@ -311,6 +799,39 @@ def simplify_ring(points: list[list[float]]) -> list[list[float]]:
     if simplified[0] != simplified[-1]:
         simplified.append(simplified[0])
     return simplified
+
+
+def simplify_open_path(points: list[list[float]]) -> list[list[float]]:
+    """Keep a source line bounded while preserving both directional endpoints."""
+    if len(points) < 2:
+        return []
+
+    source_limit = MAX_CONNECTOR_POINTS * 8
+    working = points
+    if len(working) > source_limit:
+        stride = math.ceil(len(working) / source_limit)
+        working = working[::stride]
+        if working[-1] != points[-1]:
+            working.append(points[-1])
+
+    simplified = simplify_line(working, 0.025)
+    if len(simplified) > MAX_CONNECTOR_POINTS:
+        stride = math.ceil(len(simplified) / (MAX_CONNECTOR_POINTS - 1))
+        sampled = simplified[::stride][: MAX_CONNECTOR_POINTS - 1]
+        if sampled[-1] != simplified[-1]:
+            sampled.append(simplified[-1])
+        simplified = sampled
+    return simplified
+
+
+def coordinate_gap_degrees(first: list[float], second: list[float]) -> float:
+    """Approximate local angular distance while respecting the dateline."""
+    longitude_delta = (first[0] - second[0] + 180) % 360 - 180
+    mean_latitude = math.radians((first[1] + second[1]) / 2)
+    return math.hypot(
+        longitude_delta * max(0.1, math.cos(mean_latitude)),
+        first[1] - second[1],
+    )
 
 
 def category_for_wind(wind_knots: int) -> int:
@@ -514,6 +1035,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
     document = parse_xml(extract_kml(data))
     issued_at = outlook_issue_time(document)
     grouped: dict[str, dict[str, Any]] = {}
+    connector_candidates: list[list[list[float]]] = []
 
     for placemark in document.iter():
         if local_name(placemark.tag) != "Placemark":
@@ -521,6 +1043,15 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
         fields = extended_data(placemark)
         disturbance = safe_text(fields.get("Disturbance"), 12)
         discussion = safe_text(fields.get("Discussion"), 3600)
+        line_node = first_descendant(placemark, "LineString")
+        if line_node is not None:
+            coordinates_node = first_descendant(line_node, "coordinates")
+            coordinates = coordinate_pairs(
+                coordinates_node.text if coordinates_node is not None else ""
+            )
+            connector = simplify_open_path(coordinates)
+            if connector:
+                connector_candidates.append(connector)
         if not disturbance or not discussion:
             continue
 
@@ -537,6 +1068,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
                 "latitude": None,
                 "longitude": None,
                 "area": [],
+                "connector": [],
             },
         )
 
@@ -554,6 +1086,29 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
             coordinates = coordinate_pairs(coordinates_node.text if coordinates_node is not None else "")
             if len(coordinates) >= 4:
                 row["area"].append(simplify_ring(coordinates))
+
+    # NHC's KMZ currently omits ExtendedData from the arrow LineString. Pair
+    # each line with the closest disturbance marker, orienting it away from
+    # that marker and toward the potential formation area.
+    for connector in connector_candidates:
+        closest_row: dict[str, Any] | None = None
+        closest_distance = math.inf
+        reverse = False
+        for row in grouped.values():
+            latitude = number(row.get("latitude"))
+            longitude = number(row.get("longitude"))
+            if latitude is None or longitude is None:
+                continue
+            marker = [longitude, latitude]
+            start_distance = coordinate_gap_degrees(connector[0], marker)
+            end_distance = coordinate_gap_degrees(connector[-1], marker)
+            distance = min(start_distance, end_distance)
+            if distance < closest_distance:
+                closest_row = row
+                closest_distance = distance
+                reverse = end_distance < start_distance
+        if closest_row is not None and closest_distance <= 4.0:
+            closest_row["connector"] = list(reversed(connector)) if reverse else connector
 
     output: list[dict[str, Any]] = []
     for row in grouped.values():
@@ -582,6 +1137,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
                 "name": name,
                 "title": title,
                 "basin": basin,
+                "sourceBasin": source_basin,
                 "basinLabel": BASIN_LABELS[basin],
                 "classification": "REM" if lifecycle.lower().startswith("remnant") else "DB",
                 "classificationLabel": lifecycle,
@@ -595,6 +1151,7 @@ def parse_outlooks(data: bytes, source_basin: str) -> list[dict[str, Any]]:
                 "discussionExcerpt": row["discussion"],
                 "discussionUrl": "https://www.nhc.noaa.gov/gtwo.php",
                 "area": row["area"],
+                "connector": row["connector"],
             }
         )
     return output[:MAX_OUTLOOKS]
@@ -745,6 +1302,8 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
                 if url:
                     maximum = MAX_TEXT_BYTES if layer == "discussion" else MAX_KMZ_BYTES
                     jobs[executor.submit(fetcher, url, maximum)] = (index, layer)
+                elif layer in ("track", "cone"):
+                    storms[index]["dataWarnings"].append(f"{layer} unavailable")
         for future in concurrent.futures.as_completed(jobs):
             index, layer = jobs[future]
             try:
@@ -753,12 +1312,15 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
                     storms[index]["discussionTitle"] = parsed["title"]
                     storms[index]["discussionExcerpt"] = parsed["excerpt"]
                     storms[index]["discussionForecaster"] = parsed["forecaster"]
+                elif layer in ("track", "cone") and not parsed:
+                    storms[index]["dataWarnings"].append(f"{layer} unavailable")
                 else:
                     storms[index][layer] = parsed
             except Exception:
                 storms[index]["dataWarnings"].append(f"{layer} unavailable")
 
     outlooks: list[dict[str, Any]] = []
+    incomplete_outlook_basins: list[str] = []
     outlook_jobs: dict[concurrent.futures.Future[bytes], str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         for basin, url in OUTLOOK_URLS.items():
@@ -768,7 +1330,7 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
             try:
                 outlooks.extend(parse_outlooks(future.result(), basin))
             except Exception:
-                continue
+                incomplete_outlook_basins.append(basin)
 
     # The Pacific and Central Pacific products can describe the same area.
     # Prefer the dedicated CPHC record when the point and title agree.
@@ -807,8 +1369,19 @@ def build_live_payload(fetcher: Callable[[str, int], bytes] = fetch_bytes) -> di
         "error": "",
         "storms": storms,
         "outlooks": outlooks,
+        "incompleteOutlookBasins": [
+            basin for basin in BASIN_LABELS if basin in incomplete_outlook_basins
+        ],
         "regions": regions,
     }
+
+
+def valid_incomplete_outlook_basins(value: Any) -> bool:
+    if not isinstance(value, list) or len(value) > len(BASIN_LABELS):
+        return False
+    if not all(isinstance(basin, str) and basin in BASIN_LABELS for basin in value):
+        return False
+    return len(set(value)) == len(value)
 
 
 def valid_payload(payload: Any) -> bool:
@@ -819,6 +1392,7 @@ def valid_payload(payload: Any) -> bool:
         and len(payload["storms"]) <= MAX_STORMS
         and isinstance(payload.get("outlooks"), list)
         and len(payload["outlooks"]) <= MAX_OUTLOOKS
+        and valid_incomplete_outlook_basins(payload.get("incompleteOutlookBasins", []))
     )
 
 
@@ -858,6 +1432,131 @@ def write_cache(payload: dict[str, Any], path: Path | None = None) -> None:
                 pass
 
 
+def normalized_watch_place(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    identifier = re.sub(r"[^a-zA-Z0-9_-]+", "", str(value.get("id") or ""))[:64]
+    name = safe_text(value.get("name"), 40)
+    latitude = number(value.get("latitude"))
+    longitude = number(value.get("longitude"))
+    radius = number(value.get("radiusKm"), 1000)
+    if (
+        not identifier
+        or not name
+        or latitude is None
+        or longitude is None
+        or not -90 <= latitude <= 90
+        or not -180 <= longitude <= 180
+    ):
+        return None
+    return {
+        "id": identifier,
+        "name": name,
+        "latitude": round(latitude, 5),
+        "longitude": round(longitude, 5),
+        "radiusKm": round(max(50, min(2000, radius or 1000))),
+    }
+
+
+def normalize_watch_config(value: Any) -> dict[str, Any]:
+    source = value.get("places", []) if isinstance(value, dict) else []
+    rows = source if isinstance(source, list) else []
+    places = []
+    identifiers: set[str] = set()
+    for row in rows:
+        place = normalized_watch_place(row)
+        if place is None or place["id"] in identifiers:
+            continue
+        identifiers.add(place["id"])
+        places.append(place)
+        if len(places) >= MAX_WATCH_PLACES:
+            break
+    return {"schemaVersion": 1, "places": places}
+
+
+def validate_persisted_watch_config(value: Any) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or type(value.get("schemaVersion")) is not int
+        or value.get("schemaVersion") != 1
+        or not isinstance(value.get("places"), list)
+        or len(value["places"]) > MAX_WATCH_PLACES
+    ):
+        raise DataError("watch-place settings had an unsupported structure")
+    expected_keys = {"id", "name", "latitude", "longitude", "radiusKm"}
+    places = []
+    identifiers: set[str] = set()
+    for row in value["places"]:
+        if (
+            not isinstance(row, dict)
+            or set(row) != expected_keys
+            or not isinstance(row.get("id"), str)
+            or not isinstance(row.get("name"), str)
+            or isinstance(row.get("latitude"), bool)
+            or not isinstance(row.get("latitude"), (int, float))
+            or isinstance(row.get("longitude"), bool)
+            or not isinstance(row.get("longitude"), (int, float))
+            or isinstance(row.get("radiusKm"), bool)
+            or not isinstance(row.get("radiusKm"), (int, float))
+        ):
+            raise DataError("watch-place settings contained an invalid record")
+        place = normalized_watch_place(row)
+        if place is None or place["id"] in identifiers or row != place:
+            raise DataError("watch-place settings contained an invalid record")
+        identifiers.add(place["id"])
+        places.append(place)
+    return {"schemaVersion": 1, "places": places}
+
+
+def read_watch_config(path: Path | None = None) -> dict[str, Any]:
+    target = path or watch_config_path()
+    if not target.exists():
+        return normalize_watch_config({})
+    try:
+        if not target.is_file():
+            raise DataError("watch-place settings are not a regular file")
+        if target.stat().st_size > MAX_WATCH_CONFIG_BYTES:
+            raise DataError("watch-place settings exceeded the size limit")
+        parsed = json.loads(target.read_text(encoding="utf-8"))
+    except DataError:
+        raise
+    except OSError as error:
+        raise DataError("watch-place settings could not be read") from error
+    except UnicodeDecodeError as error:
+        raise DataError("watch-place settings were not valid UTF-8") from error
+    except json.JSONDecodeError as error:
+        raise DataError("watch-place settings were not valid JSON") from error
+    return validate_persisted_watch_config(parsed)
+
+
+def write_watch_config(value: Any, path: Path | None = None) -> dict[str, Any]:
+    target = path or watch_config_path()
+    payload = normalize_watch_config(value)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_WATCH_CONFIG_BYTES:
+        raise DataError("watch-place settings exceeded the size limit")
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent,
+            prefix=".watch-places.", delete=False
+        ) as temporary:
+            temporary_name = temporary.name
+            os.chmod(temporary_name, 0o600)
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, target)
+    finally:
+        if temporary_name:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+    return payload
+
+
 def unavailable_payload(message: str, cached: dict[str, Any] | None = None) -> dict[str, Any]:
     if cached:
         payload = copy.deepcopy(cached)
@@ -876,6 +1575,7 @@ def unavailable_payload(message: str, cached: dict[str, Any] | None = None) -> d
         "error": message,
         "storms": [],
         "outlooks": [],
+        "incompleteOutlookBasins": list(BASIN_LABELS),
         "regions": [
             {"id": basin, "name": label, "activeCount": 0, "outlookCount": 0}
             for basin, label in BASIN_LABELS.items()
@@ -908,11 +1608,56 @@ def main(argv: Iterable[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("fetch", help="Fetch live NHC data, falling back to the local cache")
     subparsers.add_parser("cache", help="Print the last cached response without using the network")
+    subparsers.add_parser("watch-load", help="Print locally saved watch places")
+    watch_save = subparsers.add_parser("watch-save", help="Validate and save watch places locally")
+    watch_save.add_argument("payload", help="JSON watch-place payload")
+    place_search = subparsers.add_parser(
+        "place-search", help="Search for a map location through Open-Meteo"
+    )
+    place_search.add_argument("query", help="City, region, or postal code")
+    place_reverse = subparsers.add_parser(
+        "place-reverse", help="Name a user-selected map coordinate through Nominatim"
+    )
+    place_reverse.add_argument("latitude", type=float, help="WGS84 latitude")
+    place_reverse.add_argument("longitude", type=float, help="WGS84 longitude")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "fetch":
         emit(fetch_with_fallback())
         return 0
+
+    if args.command == "watch-load":
+        try:
+            emit(read_watch_config())
+            return 0
+        except DataError as error:
+            print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
+
+    if args.command == "watch-save":
+        try:
+            requested = json.loads(args.payload)
+            emit(write_watch_config(requested))
+            return 0
+        except (json.JSONDecodeError, OSError, DataError) as error:
+            print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
+
+    if args.command == "place-search":
+        try:
+            emit(search_places(args.query))
+            return 0
+        except DataError as error:
+            print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
+
+    if args.command == "place-reverse":
+        try:
+            emit(reverse_geocode_place(args.latitude, args.longitude))
+            return 0
+        except DataError as error:
+            print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
 
     cached = read_cache()
     if cached:
