@@ -14,6 +14,7 @@ Item {
   property var manifest: null
   property bool opened: false
   property string selectedKey: ""
+  property string regionOverviewBasin: ""
   property string sidebarMode: "activity"
   property string activeTrackerId: "cyclones"
   property bool trackerMenuOpen: false
@@ -223,18 +224,26 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
     if (payload.alerts === true) sidebarMode = "alerts"
     else if (payload.activity === true) sidebarMode = "activity"
-    if (payload.stormId) selectedKey = "storm:" + String(payload.stormId)
-    if (payload.outlookId) selectedKey = "outlook:" + String(payload.outlookId)
+    if (payload.stormId) {
+      regionOverviewBasin = ""
+      selectedKey = "storm:" + String(payload.stormId)
+    }
+    if (payload.outlookId) {
+      regionOverviewBasin = ""
+      selectedKey = "outlook:" + String(payload.outlookId)
+    }
     opened = true
     syncSelection(true)
     if (tracker && !tracker.hasLoaded && !tracker.loading) tracker.refresh()
     Qt.callLater(function() {
       keyCatcher.forceActiveFocus()
-      if (payload.globe === true) stormMap.showGlobe()
+      if (payload.globe === true) root.showGlobe()
       else if (root.sidebarMode === "alerts" && root.selectedPlace) {
         if (root.editingWatchPlace) stormMap.fitWatchPlace(root.selectedPlace)
         else stormMap.focusWatchPlace(root.selectedPlace)
       }
+      else if (root.regionOverviewBasin)
+        stormMap.fitRegion(root.regionOverviewBasin)
       else stormMap.fitSelected()
     })
   }
@@ -245,6 +254,7 @@ Item {
   }
 
   function showGlobe(_payload) {
+    regionOverviewBasin = ""
     stormMap.showGlobe()
   }
 
@@ -292,6 +302,11 @@ Item {
   }
 
   function syncSelection(_forceReveal) {
+    if (regionOverviewBasin) {
+      selectedKey = ""
+      fitRegionOverview(regionOverviewBasin)
+      return
+    }
     selectedKey = Model.selectedKeyAfterRefresh(systems, selectedKey)
     Qt.callLater(function() {
       var rowIndex = root.rowIndexForKey(root.selectedKey)
@@ -321,14 +336,22 @@ Item {
     return -1
   }
 
-  function viewRegion(basin) {
-    if (!basin) return
-    selectedKey = ""
+  function fitRegionOverview(basin) {
+    var targetBasin = String(basin || "")
+    if (!targetBasin) return
     Qt.callLater(function() {
-      stormMap.fitRegion(basin)
-      var index = root.regionIndexForBasin(basin)
+      if (root.regionOverviewBasin !== targetBasin) return
+      stormMap.fitRegion(targetBasin)
+      var index = root.regionIndexForBasin(targetBasin)
       if (index >= 0) systemList.positionViewAtIndex(index, ListView.Beginning)
     })
+  }
+
+  function viewRegion(basin) {
+    if (!basin) return
+    regionOverviewBasin = basin
+    selectedKey = ""
+    fitRegionOverview(basin)
     keyCatcher.forceActiveFocus()
   }
 
@@ -338,6 +361,7 @@ Item {
     sidebarMode = "activity"
     trackerMenuOpen = false
     selectedPlaceId = ""
+    regionOverviewBasin = ""
     selectedKey = key
     Qt.callLater(function() {
       var rowIndex = root.rowIndexForKey(key)
@@ -819,7 +843,7 @@ Item {
             else stormMap.resetView()
             event.accepted = true
           } else if (event.key === Qt.Key_0 || event.key === Qt.Key_G) {
-            stormMap.showGlobe()
+            root.showGlobe()
             event.accepted = true
           } else if (event.key === Qt.Key_O && root.selectedStorm) {
             root.openOfficial(root.selectedStorm, "advisoryUrl")
@@ -1448,7 +1472,7 @@ Item {
             height: root.minimumTouchTarget
             foreground: root.mapText
             background: root.background
-            onClicked: stormMap.showGlobe()
+            onClicked: root.showGlobe()
           }
         }
 

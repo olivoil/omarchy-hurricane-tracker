@@ -507,6 +507,17 @@ Item {
     return Model.watchAlertSnapshot(storms, outlooks, watchPlaces, formationThreshold)
   }
 
+  function placeAlertSnapshotComplete(snapshot) {
+    var summaries = Model.watchPlaceSummaries(
+      storms, outlooks, watchPlaces, formationThreshold, useImperial,
+      ({
+        snapshot: snapshot,
+        incompleteOutlookBasins: incompleteOutlookBasins,
+        incompleteSystemKeys: incompleteForecastSystemKeys
+      }))
+    return Model.watchDataLimitedCount(summaries) === 0
+  }
+
   function armAlertsQuietly() {
     alertBaseline = currentAlertSnapshot()
     alertsArmed = alertsEnabled && hasLoaded && !stale && status === "fresh"
@@ -514,8 +525,13 @@ Item {
   }
 
   function armPlaceAlertsQuietly() {
-    placeAlertBaseline = currentPlaceAlertSnapshot()
+    var current = currentPlaceAlertSnapshot()
+    var stable = Model.stabilizedAlertSnapshots(
+      placeAlertBaseline, current, incompleteOutlookBasins,
+      incompleteForecastSystemKeys)
+    placeAlertBaseline = stable.current
     placeAlertsArmed = placeAlertsEnabled && hasLoaded && !stale && status === "fresh"
+      && placeAlertSnapshotComplete(placeAlertBaseline)
     appliedPlaceAlertConfig = placeAlertConfigKey
   }
 
@@ -555,8 +571,11 @@ Item {
     if (placeAlertsEnabled) {
       var placeCurrent = currentPlaceAlertSnapshot()
       if (!placeAlertsArmed || appliedPlaceAlertConfig !== placeAlertConfigKey) {
-        placeAlertBaseline = placeCurrent
-        placeAlertsArmed = true
+        var stableQuietPlaceAlerts = Model.stabilizedAlertSnapshots(
+          placeAlertBaseline, placeCurrent, incompleteOutlookBasins,
+          incompleteForecastKeys)
+        placeAlertBaseline = stableQuietPlaceAlerts.current
+        placeAlertsArmed = placeAlertSnapshotComplete(placeAlertBaseline)
       } else {
         var stablePlaceAlerts = Model.stabilizedAlertSnapshots(
           placeAlertBaseline, placeCurrent, incompleteOutlookBasins,

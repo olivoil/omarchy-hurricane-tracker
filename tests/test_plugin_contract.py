@@ -146,15 +146,34 @@ class PluginContractTests(unittest.TestCase):
 
     def test_region_overview_clears_the_selected_system(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        sync_selection = overlay.split("function syncSelection", 1)[1].split(
+            "function rowIndexForKey", 1
+        )[0]
         view_region = overlay.split("function viewRegion(basin)", 1)[1].split(
             "function selectSystem", 1
         )[0]
+        select_system = overlay.split("function selectSystem(key)", 1)[1].split(
+            "function moveSelection", 1
+        )[0]
 
+        self.assertIn('property string regionOverviewBasin: ""', overlay)
+        self.assertIn("if (regionOverviewBasin)", sync_selection)
+        self.assertIn("fitRegionOverview(regionOverviewBasin)", sync_selection)
+        self.assertLess(
+            sync_selection.index("if (regionOverviewBasin)"),
+            sync_selection.index("Model.selectedKeyAfterRefresh"),
+        )
+        self.assertIn("regionOverviewBasin = basin", view_region)
         self.assertIn('selectedKey = ""', view_region)
         self.assertLess(
+            view_region.index("regionOverviewBasin = basin"),
             view_region.index('selectedKey = ""'),
-            view_region.index("stormMap.fitRegion(basin)"),
         )
+        self.assertLess(
+            view_region.index('selectedKey = ""'),
+            view_region.index("fitRegionOverview(basin)"),
+        )
+        self.assertIn('regionOverviewBasin = ""', select_system)
 
     def test_watch_place_editor_cannot_leak_into_activity_mode(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
@@ -320,6 +339,31 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("tracker.watchPlaceSummaries", overlay)
         self.assertIn("tracker.watchPlaceSummaries", (ROOT / "BarWidget.qml").read_text(encoding="utf-8"))
         self.assertIn('"DATA PARTIAL"', overlay)
+
+    def test_place_alert_rearm_waits_for_relevant_partial_data(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        completeness = service.split(
+            "function placeAlertSnapshotComplete(snapshot)", 1
+        )[1].split("function armAlertsQuietly", 1)[0]
+        arm_place_alerts = service.split(
+            "function armPlaceAlertsQuietly()", 1
+        )[1].split("function evaluateAlerts", 1)[0]
+        place_evaluation = service.split("if (placeAlertsEnabled)", 1)[1].split(
+            "events = Model.coalesceAlertEvents", 1
+        )[0]
+
+        self.assertIn("Model.watchPlaceSummaries", completeness)
+        self.assertIn("Model.watchDataLimitedCount", completeness)
+        self.assertIn("Model.stabilizedAlertSnapshots", arm_place_alerts)
+        self.assertIn(
+            "&& placeAlertSnapshotComplete(placeAlertBaseline)",
+            arm_place_alerts,
+        )
+        self.assertIn("Model.stabilizedAlertSnapshots", place_evaluation)
+        self.assertIn(
+            "placeAlertsArmed = placeAlertSnapshotComplete(placeAlertBaseline)",
+            place_evaluation,
+        )
 
     def test_full_outages_preserve_the_last_fresh_alert_baselines(self):
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
