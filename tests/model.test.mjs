@@ -151,6 +151,13 @@ assert.ok(model.regionCoordinates([storm], [outlook], "al").length > model.syste
 
 assert.equal(model.alertRegionCode("Atlantic"), "al")
 assert.equal(model.alertThresholdValue("Medium (40%)"), 40)
+assert.equal(model.alertRegionDataComplete("Atlantic", []), true)
+assert.equal(model.alertRegionDataComplete("Atlantic", ["al"]), false)
+assert.equal(model.alertRegionDataComplete("Atlantic", ["ep"]), true)
+assert.equal(model.alertRegionDataComplete("Eastern Pacific", ["cp"]), false)
+assert.equal(model.alertRegionDataComplete("Central Pacific", ["ep"]), false)
+assert.equal(model.alertRegionDataComplete("All NHC basins", ["al"]), false)
+assert.equal(model.alertRegionDataComplete("Off", ["al", "ep", "cp"]), true)
 const quietSnapshot = model.alertSnapshot([], [outlook], "Atlantic", "Medium (40%)", true)
 assert.equal(model.alertEvents({}, quietSnapshot).length, 0)
 const developing = { ...outlook, sevenDayChance: 40 }

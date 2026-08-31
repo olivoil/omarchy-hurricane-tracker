@@ -1279,6 +1279,20 @@ function alertRegionCode(value) {
   return ""
 }
 
+function alertRegionDataComplete(regionValue, incompleteOutlookBasins) {
+  var basin = alertRegionCode(regionValue)
+  if (!basin) return true
+  var incomplete = Array.isArray(incompleteOutlookBasins)
+    ? incompleteOutlookBasins : []
+  for (var i = 0; i < incomplete.length; i++) {
+    var unavailable = String(incomplete[i] || "")
+    if (basin === "all" || unavailable === basin) return false
+    if ((basin === "ep" || basin === "cp")
+        && (unavailable === "ep" || unavailable === "cp")) return false
+  }
+  return true
+}
+
 function alertThresholdValue(value) {
   var match = String(value || "").match(/(\d{1,3})/)
   return match ? clamp(Number(match[1]), 0, 100) : 40

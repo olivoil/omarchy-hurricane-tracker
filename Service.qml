@@ -507,6 +507,10 @@ Item {
     return Model.watchAlertSnapshot(storms, outlooks, watchPlaces, formationThreshold)
   }
 
+  function alertFeedsComplete() {
+    return Model.alertRegionDataComplete(alertRegion, incompleteOutlookBasins)
+  }
+
   function placeAlertSnapshotComplete(snapshot) {
     var summaries = Model.watchPlaceSummaries(
       storms, outlooks, watchPlaces, formationThreshold, useImperial,
@@ -521,6 +525,7 @@ Item {
   function armAlertsQuietly() {
     alertBaseline = currentAlertSnapshot()
     alertsArmed = alertsEnabled && hasLoaded && !stale && status === "fresh"
+      && alertFeedsComplete()
     appliedAlertConfig = alertConfigKey
   }
 
@@ -554,7 +559,7 @@ Item {
       var current = currentAlertSnapshot()
       if (!alertsArmed || appliedAlertConfig !== alertConfigKey) {
         alertBaseline = current
-        alertsArmed = true
+        alertsArmed = alertFeedsComplete()
       } else {
         var stableAlerts = Model.stabilizedAlertSnapshots(
           alertBaseline, current, incompleteOutlookBasins, [])

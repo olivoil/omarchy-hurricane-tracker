@@ -372,6 +372,22 @@ class PluginContractTests(unittest.TestCase):
             place_evaluation,
         )
 
+    def test_basin_alert_rearm_waits_for_relevant_partial_data(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        completeness = service.split("function alertFeedsComplete()", 1)[1].split(
+            "function placeAlertSnapshotComplete", 1
+        )[0]
+        arm_alerts = service.split("function armAlertsQuietly()", 1)[1].split(
+            "function armPlaceAlertsQuietly", 1
+        )[0]
+        global_evaluation = service.split("if (alertsEnabled)", 1)[1].split(
+            "if (placeAlertsEnabled)", 1
+        )[0]
+
+        self.assertIn("Model.alertRegionDataComplete", completeness)
+        self.assertIn("&& alertFeedsComplete()", arm_alerts)
+        self.assertIn("alertsArmed = alertFeedsComplete()", global_evaluation)
+
     def test_full_outages_preserve_the_last_fresh_alert_baselines(self):
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
         evaluate = service.split("function evaluateAlerts()", 1)[1].split(
