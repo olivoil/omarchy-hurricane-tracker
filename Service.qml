@@ -1,5 +1,7 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
+import "Launcher.js" as Launcher
 import "Model.js" as Model
 
 Item {
@@ -7,7 +9,33 @@ Item {
 
   // Injected by the Omarchy shell.
   property var shell: null
+  property var manifest: null
   property var settings: ({})
+
+  // Omarchy does not currently have a manifest field for launcher entries, so
+  // the service installs one while the plugin is enabled. A pre-existing file
+  // without our marker is always left alone.
+  readonly property string launcherDataHome: Launcher.dataHome(
+    Quickshell.env("XDG_DATA_HOME"), Quickshell.env("HOME"))
+  readonly property string launcherRuntimeHome: Launcher.runtimeHome(
+    Quickshell.env("XDG_RUNTIME_DIR"), Quickshell.env("XDG_CACHE_HOME"),
+    Quickshell.env("HOME"))
+  readonly property string launcherEntryPath: launcherDataHome
+    + "/applications/io.github.olivoil.hurricane-tracker.desktop"
+  readonly property string launcherIntentPath: launcherRuntimeHome
+    + "/hurricane-tracker-launcher.intent"
+  readonly property string launcherEntryMarker: "X-Hurricane-Tracker-Managed=true"
+  property string launcherSourceDir: ""
+  property bool launcherEntryInstalled: false
+
+  FileView {
+    id: launcherIntentFile
+    path: root.launcherIntentPath
+    blockWrites: true
+    atomicWrites: true
+    watchChanges: false
+    printErrors: false
+  }
 
   property var payload: ({
     schemaVersion: 2,
@@ -68,7 +96,7 @@ Item {
   property var reverseGeocodeCache: ({})
   property var reverseGeocodeCacheKeys: []
 
-  readonly property string backendPath: Qt.resolvedUrl("bin/omanado-data").toString().replace(/^file:\/\//, "")
+  readonly property string backendPath: Qt.resolvedUrl("bin/hurricane-tracker-data").toString().replace(/^file:\/\//, "")
   readonly property string notificationIconPath: Qt.resolvedUrl("assets/hurricane-tracker.svg").toString().replace(/^file:\/\//, "")
   readonly property string status: String(payload && payload.status || "loading")
   readonly property bool stale: payload && payload.stale === true
@@ -106,6 +134,35 @@ Item {
   readonly property string alertStatus: alertsEnabled
     ? alertRegion + " · " + Model.alertThresholdValue(formationThreshold) + "%+"
     : "Off"
+
+  function reconcileLauncherEntry(intent) {
+    launcherIntentFile.setText(intent + "\n")
+    Quickshell.execDetached([
+      "sh", "-c", Launcher.launcherEntryScript, "sh",
+      launcherIntentPath,
+      launcherSourceDir + "/hurricane-tracker.desktop",
+      launcherEntryPath,
+      launcherEntryMarker,
+      launcherSourceDir + "/assets/hurricane-tracker.svg"
+    ])
+  }
+
+  // The shell injects manifest after createObject(), so source paths are
+  // resolved when that property arrives rather than in Component.onCompleted.
+  onManifestChanged: {
+    var dir = manifest && manifest.__sourceDir
+    if (launcherEntryInstalled || !dir) return
+    launcherSourceDir = dir
+    launcherEntryInstalled = true
+    reconcileLauncherEntry("install")
+  }
+
+  // Disabling and removing a plugin both destroy its service. Delete the
+  // launcher only when it is still the entry managed by this plugin.
+  Component.onDestruction: {
+    if (!launcherEntryInstalled) return
+    reconcileLauncherEntry("remove")
+  }
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined

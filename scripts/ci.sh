@@ -6,11 +6,11 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
 python -m unittest discover -s tests -p 'test_*.py' -v
-node --test tests/model.test.mjs
+node --test tests/*.test.mjs
 node scripts/build-map-data.mjs --check
 
 if command -v qmllint >/dev/null 2>&1; then
-  qmllint -I /usr/share/omarchy/shell HurricaneIcon.qml BarWidget.qml Service.qml StormMap.qml Omanado.qml
+  qmllint -I /usr/share/omarchy/shell HurricaneIcon.qml BarWidget.qml Service.qml StormMap.qml HurricaneTracker.qml
 fi
 
 if command -v omarchy >/dev/null 2>&1; then

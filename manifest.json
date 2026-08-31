@@ -23,7 +23,7 @@
   "keepLoaded": true,
   "entryPoints": {
     "service": "Service.qml",
-    "overlay": "Omanado.qml",
+    "overlay": "HurricaneTracker.qml",
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {

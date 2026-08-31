@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import json
 from pathlib import Path
 import unittest
@@ -30,9 +31,34 @@ class PluginContractTests(unittest.TestCase):
         self.assertTrue((ROOT / "preview.png").is_file())
 
     def test_backend_is_executable(self):
-        backend = ROOT / "bin" / "omanado-data"
+        backend = ROOT / "bin" / "hurricane-tracker-data"
         self.assertTrue(backend.is_file())
         self.assertNotEqual(backend.stat().st_mode & 0o111, 0)
+
+    def test_launcher_entry_summons_the_overlay(self):
+        desktop_file = ROOT / "hurricane-tracker.desktop"
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.optionxform = str
+        parser.read(desktop_file, encoding="utf-8")
+
+        entry = parser["Desktop Entry"]
+        self.assertEqual(entry["Type"], "Application")
+        self.assertEqual(entry["Name"], "Hurricane Tracker")
+        self.assertEqual(
+            entry["Exec"],
+            "omarchy-shell shell summon io.github.olivoil.hurricane-tracker {}",
+        )
+        self.assertEqual(entry["TryExec"], "omarchy-shell")
+        self.assertEqual(entry["Icon"], "@ICON@")
+        self.assertEqual(entry["X-Hurricane-Tracker-Managed"], "true")
+
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        self.assertIn("hurricane-tracker.desktop", service)
+        self.assertIn("X-Hurricane-Tracker-Managed=true", service)
+        self.assertIn('Quickshell.env("XDG_DATA_HOME")', service)
+        self.assertIn("launcherIntentFile.setText", service)
+        self.assertIn("blockWrites: true", service)
+        self.assertIn("Component.onDestruction", service)
 
     def test_generated_map_has_bounded_geometry(self):
         collection = json.loads((ROOT / "assets" / "countries.json").read_text(encoding="utf-8"))
@@ -59,7 +85,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn("onSelectedKeyChanged: if (autoFitSelection)", storm_map)
 
     def test_navigation_shell_keeps_alerts_global_and_trackers_extensible(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         self.assertIn('property bool trackerMenuOpen: false', overlay)
         self.assertIn('readonly property var trackerDefinitions:', overlay)
         self.assertIn('title: "HURRICANE TRACKER"', overlay)
@@ -90,7 +116,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn("Home, Dad", overlay)
 
     def test_alerts_button_and_shortcut_share_toggle_navigation(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         toggle_alerts = overlay.split("function toggleAlerts()", 1)[1].split(
             "function toggleTrackerMenu", 1
         )[0]
@@ -111,7 +137,7 @@ class PluginContractTests(unittest.TestCase):
         )
 
     def test_tracker_rows_begin_directly_below_the_introduction_separator(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         tracker_menu_lead = overlay.split('id: trackerMenuPanel', 1)[1].split(
             'Repeater {', 1
         )[0]
@@ -119,7 +145,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn('height: Style.space(8)', tracker_menu_lead)
 
     def test_region_overview_clears_the_selected_system(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         view_region = overlay.split("function viewRegion(basin)", 1)[1].split(
             "function selectSystem", 1
         )[0]
@@ -131,7 +157,7 @@ class PluginContractTests(unittest.TestCase):
         )
 
     def test_watch_place_editor_cannot_leak_into_activity_mode(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         close_function = overlay.split("function close()", 1)[1].split(
             "function showGlobe", 1
         )[0]
@@ -159,7 +185,7 @@ class PluginContractTests(unittest.TestCase):
         )
 
     def test_selected_watch_location_reveals_full_alert_copy(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         place_row = overlay.split('id: placeRow', 1)[1].split(
             'QQC.ScrollBar.vertical', 1
         )[0]
@@ -179,7 +205,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('QQC.ToolTip.visible:', place_row)
 
     def test_overlay_has_readable_minimum_type_and_touch_tokens(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         self.assertIn("readonly property int typeMicro", overlay)
         self.assertIn("readonly property int typeCaption", overlay)
         self.assertIn("readonly property int minimumTouchTarget", overlay)
@@ -188,7 +214,7 @@ class PluginContractTests(unittest.TestCase):
     def test_units_follow_the_system_locale_without_exposing_a_setting_yet(self):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
 
         self.assertIn(
@@ -209,7 +235,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("Model.defaultWatchRadiusKm", overlay)
 
     def test_place_editor_supports_search_and_direct_map_placement(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
         storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
         self.assertIn('text: "NAME"', overlay)
@@ -281,9 +307,9 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("events = Model.coalesceAlertEvents(events)", service)
 
     def test_partial_outlook_data_preserves_alert_baselines(self):
-        backend = (ROOT / "bin" / "omanado-data").read_text(encoding="utf-8")
+        backend = (ROOT / "bin" / "hurricane-tracker-data").read_text(encoding="utf-8")
         service = (ROOT / "Service.qml").read_text(encoding="utf-8")
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
 
         self.assertIn('"incompleteOutlookBasins"', backend)
         self.assertIn("readonly property bool outlookDataComplete", service)
@@ -305,7 +331,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('if (stale || status !== "fresh") return', evaluate)
 
     def test_new_watch_place_names_are_suggested_without_placeholder_map_copy(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         self.assertIn('property bool draftPlaceNameManuallyEdited: false', overlay)
         self.assertIn('function suggestDraftPlaceName(value)', overlay)
         self.assertIn('root.suggestDraftPlaceName(result.name)', overlay)
@@ -331,7 +357,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn('name: draftPlaceName.trim() || "New watch place"', overlay)
 
     def test_plugin_id_is_injected_for_parallel_preview_installs(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         bar_widget = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
         self.assertIn('shell.serviceFor(pluginId)', overlay)
         self.assertIn('bar.shell.serviceFor(pluginId)', bar_widget)
@@ -365,7 +391,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("} else if (partialWatchData) {", bar_widget)
 
     def test_alerts_header_never_calls_limited_destinations_quiet(self):
-        overlay = (ROOT / "Omanado.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
 
         self.assertIn("readonly property int alertLimitedDestinationCount", overlay)
         self.assertIn(" LOCATION HAS LIMITED COVERAGE", overlay)

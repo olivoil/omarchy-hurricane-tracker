@@ -18,12 +18,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
-BACKEND = ROOT / "bin" / "omanado-data"
+BACKEND = ROOT / "bin" / "hurricane-tracker-data"
 
-loader = importlib.machinery.SourceFileLoader("omanado_data", str(BACKEND))
+loader = importlib.machinery.SourceFileLoader("hurricane_tracker_data", str(BACKEND))
 spec = importlib.util.spec_from_loader(loader.name, loader)
-omanado = importlib.util.module_from_spec(spec)
-loader.exec_module(omanado)
+tracker_data = importlib.util.module_from_spec(spec)
+loader.exec_module(tracker_data)
 
 
 def fixture(name: str) -> bytes:
@@ -77,13 +77,13 @@ class FakeOpener:
 
 class BackendTests(unittest.TestCase):
     def test_hurricane_categories_follow_saffir_simpson_thresholds(self):
-        self.assertEqual([omanado.category_for_wind(value) for value in (63, 64, 82, 83, 95, 96, 112, 113, 136, 137)],
+        self.assertEqual([tracker_data.category_for_wind(value) for value in (63, 64, 82, 83, 95, 96, 112, 113, 136, 137)],
                          [0, 1, 1, 2, 2, 3, 3, 4, 4, 5])
-        self.assertEqual(omanado.official_mph(40), 45)
-        self.assertEqual(omanado.official_mph(55), 65)
+        self.assertEqual(tracker_data.official_mph(40), 45)
+        self.assertEqual(tracker_data.official_mph(55), 65)
 
     def test_forecast_track_extracts_hours_wind_and_coordinates(self):
-        points = omanado.parse_forecast_track(kmz(fixture("forecast-track.kml")))
+        points = tracker_data.parse_forecast_track(kmz(fixture("forecast-track.kml")))
         self.assertEqual([point["forecastHour"] for point in points], [0, 24, 48])
         self.assertEqual(points[1]["category"], 3)
         self.assertEqual(points[1]["windMph"], 115)
@@ -91,20 +91,20 @@ class BackendTests(unittest.TestCase):
         self.assertIn("August 30", points[2]["validTimeLabel"])
 
     def test_cone_is_closed_and_bounded(self):
-        rings = omanado.parse_cone(kmz(fixture("cone.kml")))
+        rings = tracker_data.parse_cone(kmz(fixture("cone.kml")))
         self.assertEqual(len(rings), 1)
         self.assertEqual(rings[0][0], rings[0][-1])
-        self.assertLessEqual(len(rings[0]), omanado.MAX_CONE_POINTS + 1)
+        self.assertLessEqual(len(rings[0]), tracker_data.MAX_CONE_POINTS + 1)
 
     def test_best_track_is_chronological(self):
-        points = omanado.parse_best_track(kmz(fixture("best-track.kml")))
+        points = tracker_data.parse_best_track(kmz(fixture("best-track.kml")))
         self.assertEqual(len(points), 2)
         self.assertEqual(points[0]["classification"], "TS")
         self.assertEqual(points[1]["category"], 1)
         self.assertEqual(points[1]["time"], "2026-08-28T00:00:00Z")
 
     def test_outlook_combines_area_point_probability_and_remnant_name(self):
-        outlooks = omanado.parse_outlooks(kmz(fixture("outlook.kml")), "al")
+        outlooks = tracker_data.parse_outlooks(kmz(fixture("outlook.kml")), "al")
         self.assertEqual(len(outlooks), 1)
         outlook = outlooks[0]
         self.assertEqual(outlook["name"], "Dolly")
@@ -116,21 +116,21 @@ class BackendTests(unittest.TestCase):
         self.assertGreaterEqual(len(outlook["connector"]), 2)
         self.assertEqual(outlook["connector"][0], [-51.7, 16.3])
         self.assertEqual(outlook["connector"][-1], [-67.0, 19.0])
-        self.assertLessEqual(len(outlook["connector"]), omanado.MAX_CONNECTOR_POINTS)
+        self.assertLessEqual(len(outlook["connector"]), tracker_data.MAX_CONNECTOR_POINTS)
         self.assertEqual(outlook["updatedAt"], "2026-08-28T23:39:08Z")
 
     def test_outlook_keeps_its_source_feed_when_displayed_across_a_boundary(self):
         document = fixture("outlook.kml").replace(
             b"-51.4,16.2,0", b"-145.0,16.2,0"
         )
-        outlook = omanado.parse_outlooks(kmz(document), "ep")[0]
+        outlook = tracker_data.parse_outlooks(kmz(document), "ep")[0]
 
         self.assertEqual(outlook["basin"], "cp")
         self.assertEqual(outlook["sourceBasin"], "ep")
         self.assertTrue(outlook["id"].startswith("cp-outlook-"))
 
     def test_forecast_discussion_extracts_narrative_and_forecaster(self):
-        discussion = omanado.parse_forecast_discussion(fixture("discussion.html"))
+        discussion = tracker_data.parse_forecast_discussion(fixture("discussion.html"))
         self.assertEqual(discussion["title"], "Hurricane Ada Discussion Number 14")
         self.assertIn("Ada has strengthened", discussion["excerpt"])
         self.assertIn("guidance envelope", discussion["excerpt"])
@@ -139,16 +139,16 @@ class BackendTests(unittest.TestCase):
 
     def test_discussion_excerpt_ends_at_a_readable_boundary(self):
         source = "forecast guidance " * 5 + "stays uncertain. " + "Later details " * 100
-        excerpt = omanado.readable_excerpt(source, 120)
+        excerpt = tracker_data.readable_excerpt(source, 120)
         self.assertLessEqual(len(excerpt), 120)
         self.assertTrue(excerpt.endswith(". …"))
         self.assertIn("stays uncertain", excerpt)
 
     def test_only_nhc_https_urls_are_accepted(self):
-        self.assertTrue(omanado.is_safe_url("https://www.nhc.noaa.gov/CurrentStorms.json"))
-        self.assertFalse(omanado.is_safe_url("http://www.nhc.noaa.gov/CurrentStorms.json"))
-        self.assertFalse(omanado.is_safe_url("https://nhc.noaa.gov.attacker.example/file"))
-        self.assertFalse(omanado.is_safe_url("https://user@www.nhc.noaa.gov/file"))
+        self.assertTrue(tracker_data.is_safe_url("https://www.nhc.noaa.gov/CurrentStorms.json"))
+        self.assertFalse(tracker_data.is_safe_url("http://www.nhc.noaa.gov/CurrentStorms.json"))
+        self.assertFalse(tracker_data.is_safe_url("https://nhc.noaa.gov.attacker.example/file"))
+        self.assertFalse(tracker_data.is_safe_url("https://user@www.nhc.noaa.gov/file"))
 
     def test_api_response_reader_enforces_status_type_and_streaming_size_limit(self):
         oversized = FakeResponse(
@@ -156,16 +156,16 @@ class BackendTests(unittest.TestCase):
             status=200,
             headers={"Content-Type": "application/json", "Content-Length": "8"},
         )
-        with self.assertRaisesRegex(omanado.DataError, "size limit"):
-            omanado.read_bounded_response(
+        with self.assertRaisesRegex(tracker_data.DataError, "size limit"):
+            tracker_data.read_bounded_response(
                 oversized, 64, "Open-Meteo", require_json=True
             )
         self.assertEqual(oversized.read_size, 65)
 
-        with self.assertRaisesRegex(omanado.DataError, "non-success"):
-            omanado.read_bounded_response(FakeResponse(b"{}", status=503), 64, "API")
-        with self.assertRaisesRegex(omanado.DataError, "not JSON"):
-            omanado.read_bounded_response(
+        with self.assertRaisesRegex(tracker_data.DataError, "non-success"):
+            tracker_data.read_bounded_response(FakeResponse(b"{}", status=503), 64, "API")
+        with self.assertRaisesRegex(tracker_data.DataError, "not JSON"):
+            tracker_data.read_bounded_response(
                 FakeResponse(b"{}", headers={"Content-Type": "text/html"}),
                 64,
                 "API",
@@ -177,17 +177,17 @@ class BackendTests(unittest.TestCase):
             b"{}",
             headers={"Content-Type": "application/json", "Content-Length": "65"},
         )
-        with self.assertRaisesRegex(omanado.DataError, "size limit"):
-            omanado.read_bounded_response(response, 64, "API", require_json=True)
+        with self.assertRaisesRegex(tracker_data.DataError, "size limit"):
+            tracker_data.read_bounded_response(response, 64, "API", require_json=True)
         self.assertEqual(response.read_size, 0)
 
     def test_open_meteo_request_is_fixed_encoded_and_refuses_redirects(self):
-        url = omanado.open_meteo_geocoding_url("  Sarasota, FL  ")
-        self.assertTrue(omanado.is_open_meteo_geocoding_url(url))
+        url = tracker_data.open_meteo_geocoding_url("  Sarasota, FL  ")
+        self.assertTrue(tracker_data.is_open_meteo_geocoding_url(url))
         self.assertIn("name=Sarasota%2C+FL", url)
         self.assertIn("count=8", url)
         self.assertFalse(
-            omanado.is_open_meteo_geocoding_url(
+            tracker_data.is_open_meteo_geocoding_url(
                 "https://geocoding-api.open-meteo.com.attacker.test/v1/search?name=x"
             )
         )
@@ -197,11 +197,11 @@ class BackendTests(unittest.TestCase):
             url="https://attacker.test/private",
             headers={"Content-Type": "application/json"},
         )
-        with self.assertRaisesRegex(omanado.DataError, "redirect"):
-            omanado.fetch_direct_bytes(
+        with self.assertRaisesRegex(tracker_data.DataError, "redirect"):
+            tracker_data.fetch_direct_bytes(
                 url,
                 64,
-                omanado.is_open_meteo_geocoding_url,
+                tracker_data.is_open_meteo_geocoding_url,
                 "Open-Meteo",
                 "application/json",
                 5,
@@ -209,7 +209,7 @@ class BackendTests(unittest.TestCase):
                 opener=FakeOpener(redirected),
             )
         self.assertIsNone(
-            omanado.NoRedirectHandler().redirect_request(None, None, 302, "", {}, url)
+            tracker_data.NoRedirectHandler().redirect_request(None, None, 302, "", {}, url)
         )
 
     def test_direct_opener_does_not_follow_an_http_redirect(self):
@@ -239,11 +239,11 @@ class BackendTests(unittest.TestCase):
         thread.start()
         try:
             base_url = f"http://127.0.0.1:{server.server_port}"
-            opener = omanado.urllib.request.build_opener(
-                omanado.urllib.request.ProxyHandler({}), omanado.NoRedirectHandler()
+            opener = tracker_data.urllib.request.build_opener(
+                tracker_data.urllib.request.ProxyHandler({}), tracker_data.NoRedirectHandler()
             )
-            with self.assertRaisesRegex(omanado.DataError, "redirect"):
-                omanado.fetch_direct_bytes(
+            with self.assertRaisesRegex(tracker_data.DataError, "redirect"):
+                tracker_data.fetch_direct_bytes(
                     base_url + "/redirect",
                     64,
                     lambda candidate: candidate.startswith(base_url + "/"),
@@ -260,7 +260,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(requested_paths, ["/redirect"])
 
     def test_place_search_normalizes_safe_results_and_keeps_personal_data_out(self):
-        payload = omanado.search_places(
+        payload = tracker_data.search_places(
             "Sarasota, FL",
             lambda query: {
                 "results": [
@@ -308,19 +308,19 @@ class BackendTests(unittest.TestCase):
             {**safe, "id": 7, "latitude": "0.3365"},
             {**safe, "id": 8, "longitude": True},
         ]
-        payload = omanado.normalize_place_search_payload(
+        payload = tracker_data.normalize_place_search_payload(
             "Sao Tome", {"results": [safe] + unsafe_rows}
         )
         self.assertEqual(len(payload["results"]), 1)
         self.assertEqual(payload["results"][0]["name"], "São Tomé & Príncipe")
 
     def test_place_search_query_and_result_counts_are_bounded(self):
-        with self.assertRaises(omanado.DataError):
-            omanado.normalize_place_query("x")
-        with self.assertRaises(omanado.DataError):
-            omanado.normalize_place_query("Paris\nFrance")
-        with self.assertRaises(omanado.DataError):
-            omanado.normalize_place_query("x" * 121)
+        with self.assertRaises(tracker_data.DataError):
+            tracker_data.normalize_place_query("x")
+        with self.assertRaises(tracker_data.DataError):
+            tracker_data.normalize_place_query("Paris\nFrance")
+        with self.assertRaises(tracker_data.DataError):
+            tracker_data.normalize_place_query("x" * 121)
 
         rows = [
             {
@@ -333,32 +333,32 @@ class BackendTests(unittest.TestCase):
             }
             for index in range(100)
         ]
-        payload = omanado.normalize_place_search_payload("Place", {"results": rows})
-        self.assertEqual(len(payload["results"]), omanado.MAX_PLACE_SEARCH_RESULTS)
+        payload = tracker_data.normalize_place_search_payload("Place", {"results": rows})
+        self.assertEqual(len(payload["results"]), tracker_data.MAX_PLACE_SEARCH_RESULTS)
 
     def test_reverse_geocoding_request_is_fixed_bounded_and_refuses_redirects(self):
-        url = omanado.nominatim_reverse_url(24.1426, -110.3128)
-        self.assertTrue(omanado.is_nominatim_reverse_url(url))
+        url = tracker_data.nominatim_reverse_url(24.1426, -110.3128)
+        self.assertTrue(tracker_data.is_nominatim_reverse_url(url))
         self.assertIn("lat=24.14260", url)
         self.assertIn("lon=-110.31280", url)
         self.assertFalse(
-            omanado.is_nominatim_reverse_url(
+            tracker_data.is_nominatim_reverse_url(
                 "https://nominatim.openstreetmap.org.attacker.test/reverse?lat=1&lon=2"
             )
         )
-        self.assertFalse(omanado.is_nominatim_reverse_url(url + "&lat=1"))
+        self.assertFalse(tracker_data.is_nominatim_reverse_url(url + "&lat=1"))
         redirected = FakeResponse(
             b"{}",
             url="https://attacker.test/private",
             headers={"Content-Type": "application/json"},
         )
-        with self.assertRaisesRegex(omanado.DataError, "redirect"):
-            omanado.fetch_reverse_geocode_json(
+        with self.assertRaisesRegex(tracker_data.DataError, "redirect"):
+            tracker_data.fetch_reverse_geocode_json(
                 24.1426, -110.3128, opener=FakeOpener(redirected)
             )
 
     def test_reverse_geocoding_normalizes_only_safe_place_names(self):
-        payload = omanado.reverse_geocode_place(
+        payload = tracker_data.reverse_geocode_place(
             24.1426,
             -110.3128,
             lambda latitude, longitude: {
@@ -379,8 +379,8 @@ class BackendTests(unittest.TestCase):
             "name": "La Paz",
             "context": "Baja California Sur, Mexico",
         })
-        with self.assertRaises(omanado.DataError):
-            omanado.normalize_reverse_geocode_payload(
+        with self.assertRaises(tracker_data.DataError):
+            tracker_data.normalize_reverse_geocode_payload(
                 24.1426,
                 -110.3128,
                 {
@@ -391,14 +391,14 @@ class BackendTests(unittest.TestCase):
 
     def test_live_payload_combines_summary_track_cone_and_history(self):
         resources = {
-            omanado.CURRENT_STORMS_URL: fixture("current-storms.json"),
+            tracker_data.CURRENT_STORMS_URL: fixture("current-storms.json"),
             "ADA_TRACK.kmz": kmz(fixture("forecast-track.kml")),
             "ADA_CONE.kmz": kmz(fixture("cone.kml")),
             "ada_best_track.kmz": kmz(fixture("best-track.kml")),
             "MIATCDAT1.shtml": fixture("discussion.html"),
-            omanado.OUTLOOK_URLS["al"]: kmz(fixture("outlook.kml")),
-            omanado.OUTLOOK_URLS["ep"]: kmz(fixture("empty-outlook.kml")),
-            omanado.OUTLOOK_URLS["cp"]: kmz(fixture("empty-outlook.kml")),
+            tracker_data.OUTLOOK_URLS["al"]: kmz(fixture("outlook.kml")),
+            tracker_data.OUTLOOK_URLS["ep"]: kmz(fixture("empty-outlook.kml")),
+            tracker_data.OUTLOOK_URLS["cp"]: kmz(fixture("empty-outlook.kml")),
         }
 
         def fetcher(url: str, maximum: int) -> bytes:
@@ -408,7 +408,7 @@ class BackendTests(unittest.TestCase):
                     return content
             raise AssertionError(f"unexpected URL {url}")
 
-        payload = omanado.build_live_payload(fetcher)
+        payload = tracker_data.build_live_payload(fetcher)
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(len(payload["storms"]), 1)
         storm = payload["storms"][0]
@@ -425,11 +425,11 @@ class BackendTests(unittest.TestCase):
 
     def test_empty_live_feed_is_a_fresh_quiet_state(self):
         def fetcher(url: str, maximum: int) -> bytes:
-            if url == omanado.CURRENT_STORMS_URL:
+            if url == tracker_data.CURRENT_STORMS_URL:
                 return json.dumps({"activeStorms": []}).encode("utf-8")
             return kmz(fixture("empty-outlook.kml"))
 
-        payload = omanado.build_live_payload(fetcher)
+        payload = tracker_data.build_live_payload(fetcher)
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(payload["storms"], [])
         self.assertEqual(payload["outlooks"], [])
@@ -437,37 +437,37 @@ class BackendTests(unittest.TestCase):
 
     def test_partial_outlook_failure_is_declared_in_the_payload(self):
         def fetcher(url: str, maximum: int) -> bytes:
-            if url == omanado.CURRENT_STORMS_URL:
+            if url == tracker_data.CURRENT_STORMS_URL:
                 return json.dumps({"activeStorms": []}).encode("utf-8")
-            if url == omanado.OUTLOOK_URLS["al"]:
-                raise omanado.DataError("Atlantic outlook unavailable")
+            if url == tracker_data.OUTLOOK_URLS["al"]:
+                raise tracker_data.DataError("Atlantic outlook unavailable")
             return kmz(fixture("empty-outlook.kml"))
 
-        payload = omanado.build_live_payload(fetcher)
+        payload = tracker_data.build_live_payload(fetcher)
 
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(payload["incompleteOutlookBasins"], ["al"])
-        self.assertTrue(omanado.valid_payload(payload))
-        self.assertFalse(omanado.valid_payload({
+        self.assertTrue(tracker_data.valid_payload(payload))
+        self.assertFalse(tracker_data.valid_payload({
             **payload, "incompleteOutlookBasins": ["al", "al"]
         }))
-        self.assertFalse(omanado.valid_payload({
+        self.assertFalse(tracker_data.valid_payload({
             **payload, "incompleteOutlookBasins": ["unknown"]
         }))
-        self.assertFalse(omanado.valid_payload({
+        self.assertFalse(tracker_data.valid_payload({
             **payload, "incompleteOutlookBasins": [{}]
         }))
         legacy_payload = dict(payload)
         legacy_payload.pop("incompleteOutlookBasins")
-        self.assertTrue(omanado.valid_payload(legacy_payload))
+        self.assertTrue(tracker_data.valid_payload(legacy_payload))
 
     def test_detail_failure_keeps_the_current_storm_visible(self):
         def fetcher(url: str, maximum: int) -> bytes:
-            if url == omanado.CURRENT_STORMS_URL:
+            if url == tracker_data.CURRENT_STORMS_URL:
                 return fixture("current-storms.json")
-            raise omanado.DataError("detail unavailable")
+            raise tracker_data.DataError("detail unavailable")
 
-        payload = omanado.build_live_payload(fetcher)
+        payload = tracker_data.build_live_payload(fetcher)
         self.assertEqual(len(payload["storms"]), 1)
         storm = payload["storms"][0]
         self.assertEqual(storm["name"], "Ada")
@@ -483,17 +483,17 @@ class BackendTests(unittest.TestCase):
         current["activeStorms"][0].pop("trackCone")
 
         def fetcher(url: str, maximum: int) -> bytes:
-            if url == omanado.CURRENT_STORMS_URL:
+            if url == tracker_data.CURRENT_STORMS_URL:
                 return json.dumps(current).encode("utf-8")
             if url.endswith("ada_best_track.kmz"):
                 return kmz(fixture("best-track.kml"))
             if url.endswith("MIATCDAT1.shtml"):
                 return fixture("discussion.html")
-            if url in omanado.OUTLOOK_URLS.values():
+            if url in tracker_data.OUTLOOK_URLS.values():
                 return kmz(fixture("empty-outlook.kml"))
             raise AssertionError(f"unexpected URL {url}")
 
-        payload = omanado.build_live_payload(fetcher)
+        payload = tracker_data.build_live_payload(fetcher)
 
         self.assertEqual(set(payload["storms"][0]["dataWarnings"]), {
             "track unavailable", "cone unavailable"
@@ -501,7 +501,7 @@ class BackendTests(unittest.TestCase):
 
     def test_empty_forecast_products_mark_geometry_incomplete(self):
         def fetcher(url: str, maximum: int) -> bytes:
-            if url == omanado.CURRENT_STORMS_URL:
+            if url == tracker_data.CURRENT_STORMS_URL:
                 return fixture("current-storms.json")
             if url.endswith(("ADA_TRACK.kmz", "ADA_CONE.kmz")):
                 return kmz(fixture("empty-outlook.kml"))
@@ -509,11 +509,11 @@ class BackendTests(unittest.TestCase):
                 return kmz(fixture("best-track.kml"))
             if url.endswith("MIATCDAT1.shtml"):
                 return fixture("discussion.html")
-            if url in omanado.OUTLOOK_URLS.values():
+            if url in tracker_data.OUTLOOK_URLS.values():
                 return kmz(fixture("empty-outlook.kml"))
             raise AssertionError(f"unexpected URL {url}")
 
-        payload = omanado.build_live_payload(fetcher)
+        payload = tracker_data.build_live_payload(fetcher)
 
         self.assertEqual(set(payload["storms"][0]["dataWarnings"]), {
             "track unavailable", "cone unavailable"
@@ -528,18 +528,18 @@ class BackendTests(unittest.TestCase):
                 "stale": False,
                 "fetchedAt": "2026-08-28T12:00:00Z",
                 "checkedAt": "2026-08-28T12:00:00Z",
-                "source": omanado.source_metadata(),
+                "source": tracker_data.source_metadata(),
                 "error": "",
                 "storms": [],
                 "outlooks": [],
                 "regions": [],
             }
-            omanado.write_cache(cached, path)
+            tracker_data.write_cache(cached, path)
 
             def failure(url: str, maximum: int) -> bytes:
-                raise omanado.DataError("offline")
+                raise tracker_data.DataError("offline")
 
-            payload = omanado.fetch_with_fallback(failure, path)
+            payload = tracker_data.fetch_with_fallback(failure, path)
             self.assertEqual(payload["status"], "cached")
             self.assertTrue(payload["stale"])
             self.assertEqual(payload["fetchedAt"], "2026-08-28T12:00:00Z")
@@ -554,15 +554,15 @@ class BackendTests(unittest.TestCase):
                 "stale": False,
                 "fetchedAt": "2026-08-28T12:00:00Z",
                 "checkedAt": "2026-08-28T12:00:00Z",
-                "source": omanado.source_metadata(),
+                "source": tracker_data.source_metadata(),
                 "error": "",
                 "storms": [],
                 "outlooks": [],
                 "regions": [],
             }
-            omanado.write_cache(payload, path)
+            tracker_data.write_cache(payload, path)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(omanado.read_cache(path), payload)
+            self.assertEqual(tracker_data.read_cache(path), payload)
 
     def test_watch_places_are_sanitized_private_and_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -602,18 +602,18 @@ class BackendTests(unittest.TestCase):
                     for index in range(20)
                 ],
             }
-            saved = omanado.write_watch_config(requested, path)
+            saved = tracker_data.write_watch_config(requested, path)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(saved["schemaVersion"], 1)
-            self.assertEqual(len(saved["places"]), omanado.MAX_WATCH_PLACES)
+            self.assertEqual(len(saved["places"]), tracker_data.MAX_WATCH_PLACES)
             self.assertEqual(saved["places"][0]["id"], "home")
             self.assertEqual(saved["places"][0]["name"], "Home base")
             self.assertEqual(saved["places"][0]["radiusKm"], 2000)
-            self.assertEqual(omanado.read_watch_config(path), saved)
+            self.assertEqual(tracker_data.read_watch_config(path), saved)
 
     def test_corrupt_watch_file_is_reported_without_being_replaced(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "omanado" / "watch-places.json"
+            path = Path(directory) / "hurricane-tracker" / "watch-places.json"
             path.parent.mkdir(parents=True)
             path.write_text("{not valid json", encoding="utf-8")
 
@@ -649,7 +649,7 @@ class BackendTests(unittest.TestCase):
                 "schemaVersion": 1,
                 "places": [
                     {**valid, "id": f"place-{index}", "name": f"Place {index}"}
-                    for index in range(omanado.MAX_WATCH_PLACES + 1)
+                    for index in range(tracker_data.MAX_WATCH_PLACES + 1)
                 ],
             },
         ]
@@ -660,31 +660,31 @@ class BackendTests(unittest.TestCase):
                 with self.subTest(config=config):
                     original = json.dumps(config)
                     path.write_text(original, encoding="utf-8")
-                    with self.assertRaises(omanado.DataError):
-                        omanado.read_watch_config(path)
+                    with self.assertRaises(tracker_data.DataError):
+                        tracker_data.read_watch_config(path)
                     self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_empty_or_relative_xdg_config_home_uses_home_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
-            expected = Path(directory) / ".config" / "omanado" / "watch-places.json"
+            expected = Path(directory) / ".config" / "hurricane-tracker" / "watch-places.json"
             for configured in ("", "relative/config"):
                 with self.subTest(configured=configured), mock.patch.dict(
                     os.environ,
                     {"HOME": directory, "XDG_CONFIG_HOME": configured},
                     clear=False,
                 ):
-                    self.assertEqual(omanado.watch_config_path(), expected)
+                    self.assertEqual(tracker_data.watch_config_path(), expected)
 
     def test_relative_home_uses_the_account_directory_fallback(self):
         account_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
-        expected = account_home / ".config" / "omanado" / "watch-places.json"
+        expected = account_home / ".config" / "hurricane-tracker" / "watch-places.json"
         with mock.patch.dict(
             os.environ,
             {"HOME": "relative/home", "XDG_CONFIG_HOME": ""},
             clear=False,
         ):
-            self.assertEqual(omanado.watch_config_path(), expected)
-            self.assertTrue(omanado.watch_config_path().is_absolute())
+            self.assertEqual(tracker_data.watch_config_path(), expected)
+            self.assertTrue(tracker_data.watch_config_path().is_absolute())
 
     def test_unresolved_relative_home_is_rejected(self):
         with mock.patch.dict(
@@ -692,11 +692,11 @@ class BackendTests(unittest.TestCase):
             {"HOME": "relative/home", "XDG_CONFIG_HOME": "relative/config"},
             clear=False,
         ), mock.patch("pwd.getpwuid", return_value=mock.Mock(pw_dir="relative/account")):
-            with self.assertRaises(omanado.DataError):
-                omanado.watch_config_path()
+            with self.assertRaises(tracker_data.DataError):
+                tracker_data.watch_config_path()
 
     def test_watch_place_radius_defaults_to_forecast_awareness_range(self):
-        place = omanado.normalized_watch_place(
+        place = tracker_data.normalized_watch_place(
             {
                 "id": "cancun",
                 "name": "Cancún",

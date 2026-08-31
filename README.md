@@ -36,6 +36,9 @@ Python 3.
 omarchy plugin add https://github.com/olivoil/omarchy-hurricane-tracker.git --enable
 ```
 
+Once enabled, open it from `Super+Space` by searching for **Hurricane Tracker**.
+The plugin removes its launcher entry when it is disabled or uninstalled.
+
 It also needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` to download
 advisories and outlooks. Typed place search uses
 `geocoding-api.open-meteo.com`; map placement still works when online place
@@ -79,10 +82,10 @@ quiet starting baseline as basin notifications and are grouped when one refresh
 produces several updates.
 
 Watch places are stored locally in
-`~/.config/omanado/watch-places.json`, or under `$XDG_CONFIG_HOME` when set. The
-file is written with user-only permissions. Current source coverage is limited
-to NHC basins; a place elsewhere remains saved but is marked as outside the
-current source coverage.
+`~/.config/hurricane-tracker/watch-places.json`, or under `$XDG_CONFIG_HOME`
+when set. The file is written with user-only permissions. Current source
+coverage is limited to NHC basins; a place elsewhere remains saved but is
+marked as outside the current source coverage.
 
 Online place lookup waits until typing pauses, then sends only the geographic
 search text to Open-Meteo. Choosing a point on the globe sends that coordinate
@@ -139,9 +142,10 @@ Map-click place names are provided by
 [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) through
 [Nominatim](https://nominatim.org/release-docs/latest/api/Reverse/).
 
-The latest data is cached at `~/.cache/omanado/storms.json`. If you have set
-`$XDG_CACHE_HOME`, the cache is stored in `$XDG_CACHE_HOME/omanado/storms.json`
-instead. It contains public weather data only.
+The latest data is cached at `~/.cache/hurricane-tracker/storms.json`. If you
+have set `$XDG_CACHE_HOME`, the cache is stored in
+`$XDG_CACHE_HOME/hurricane-tracker/storms.json` instead. It contains public
+weather data only.
 
 > Hurricane Tracker is an awareness tool, not an emergency warning system. The
 > forecast cone shows the probable path of the storm's center; dangerous wind,
@@ -156,7 +160,9 @@ omarchy restart shell
 ```
 
 Restarting the shell makes sure the QML interface and data helper are updated
-together. Your alert settings, watch places, and cached NHC data are preserved.
+together. Your alert settings and watch places are preserved. Version 0.0.1
+used a different cache location, so its first update starts a fresh weather
+cache; later updates preserve the cache at the path above.
 
 ## Uninstall
 
@@ -165,9 +171,9 @@ omarchy plugin remove io.github.olivoil.hurricane-tracker
 ```
 
 Omarchy leaves cached weather data and saved watch places behind. If you want to
-remove them as well, delete `~/.cache/omanado/storms.json` and
-`~/.config/omanado/watch-places.json`, or their equivalents under your custom
-XDG directories.
+remove them as well, delete `~/.cache/hurricane-tracker/storms.json` and
+`~/.config/hurricane-tracker/watch-places.json`, or their equivalents under
+your custom XDG directories.
 
 ## Development
 
