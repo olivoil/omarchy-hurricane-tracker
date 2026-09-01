@@ -14,7 +14,9 @@ BarWidget {
     ? bar.shell.serviceFor(pluginId) : null
   readonly property int activeCount: tracker ? tracker.activeCount : 0
   readonly property int trackingCount: tracker ? tracker.trackingCount : 0
+  readonly property int earthquakeCount: tracker ? tracker.earthquakeCount : 0
   readonly property var strongestStorm: activeCount > 0 ? tracker.storms[0] : null
+  readonly property var latestEarthquake: earthquakeCount > 0 ? tracker.earthquakes[0] : null
   readonly property bool hasWatchPlaces: tracker ? tracker.watchPlaceCount > 0 : false
   readonly property var watchPlaceSummaries: hasWatchPlaces
     && Array.isArray(tracker.watchPlaceSummaries) ? tracker.watchPlaceSummaries : []
@@ -27,14 +29,16 @@ BarWidget {
     && unsupportedPlaceCount === watchPlaceSummaries.length
   readonly property string personalAttentionState:
     Model.watchStrongestAttentionState(watchPlaceSummaries)
-  readonly property int indicatorCount: hasWatchPlaces ? personalAlertCount : trackingCount
+  readonly property int indicatorCount: hasWatchPlaces ? personalAlertCount
+    : (trackingCount > 0 ? trackingCount : earthquakeCount)
   readonly property color personalAlertColor: personalAttentionState === "urgent" ? Color.urgent
     : (personalAttentionState === "monitor" ? "#e9be62" : Color.accent)
   readonly property color indicatorColor: hasWatchPlaces
     ? ((limitedCoverage || partialWatchData) && personalAlertCount === 0
       ? "#e9be62" : personalAlertColor)
     : (strongestStorm ? Model.severityColor(strongestStorm)
-      : (bar ? bar.barForeground : Color.foreground))
+      : (latestEarthquake ? Model.earthquakeColor(latestEarthquake)
+        : (bar ? bar.barForeground : Color.foreground)))
 
   function syncService() {
     if (root.tracker && "settings" in root.tracker) root.tracker.settings = root.settings
@@ -45,7 +49,9 @@ BarWidget {
   }
 
   function openSource() {
-    Quickshell.execDetached(["omarchy-launch-browser", "https://www.nhc.noaa.gov/"])
+    var tropicalContext = hasWatchPlaces || trackingCount > 0
+    Quickshell.execDetached(["omarchy-launch-browser", tropicalContext
+      ? "https://www.nhc.noaa.gov/" : "https://earthquake.usgs.gov/earthquakes/"])
     if (root.bar && root.bar.shell && typeof root.bar.shell.hide === "function")
       root.bar.shell.hide(root.pluginId)
   }
@@ -83,6 +89,10 @@ BarWidget {
     } else {
       summary = Model.trackingSummary(tracker.storms, tracker.outlooks)
     }
+    var earthquakeSummary = tracker.earthquakeHasLoaded
+      ? Model.earthquakeSummary(tracker.earthquakes) : "Checking USGS"
+    if (tracker.earthquakeStale) earthquakeSummary = "Saved events · " + earthquakeSummary
+    summary += " · " + earthquakeSummary
     return tracker.stale ? "Saved data · " + summary : summary
   }
 
@@ -111,10 +121,21 @@ BarWidget {
       readonly property color contentColor: button.active ? button.activeColor : button.foreground
 
       HurricaneIcon {
+        visible: root.hasWatchPlaces || root.trackingCount > 0 || root.earthquakeCount === 0
         anchors.verticalCenter: parent.verticalCenter
         width: Style.font.icon
         height: width
         iconColor: barContent.contentColor
+      }
+
+      Text {
+        visible: !root.hasWatchPlaces && root.trackingCount === 0 && root.earthquakeCount > 0
+        anchors.verticalCenter: parent.verticalCenter
+        text: "\uf0ac"
+        textFormat: Text.PlainText
+        color: barContent.contentColor
+        font.family: Style.font.family
+        font.pixelSize: Style.font.icon
       }
 
       Text {
@@ -139,7 +160,9 @@ BarWidget {
         root.openSource()
       } else {
         root.bar.run("omarchy-shell shell toggle " + root.pluginId
-          + " '{\"activity\":true}'")
+          + (root.hasWatchPlaces || root.trackingCount > 0
+            ? " '{\"activity\":true}'"
+            : " '{\"activity\":true,\"mode\":\"earthquakes\"}'"))
       }
     }
   }

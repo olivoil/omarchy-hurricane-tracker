@@ -14,15 +14,16 @@ class PluginContractTests(unittest.TestCase):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["schemaVersion"], 1)
         self.assertEqual(manifest["id"], "io.github.olivoil.hurricane-tracker")
-        self.assertEqual(manifest["name"], "Hurricane Tracker")
-        self.assertEqual(manifest["barWidget"]["displayName"], "Hurricane Tracker")
-        self.assertEqual(manifest["version"], "0.0.1")
+        self.assertEqual(manifest["name"], "Hurricane + Earthquake Tracker")
+        self.assertEqual(manifest["barWidget"]["displayName"], "Hurricane + Earthquake Tracker")
+        self.assertEqual(manifest["version"], "0.1.0")
         self.assertEqual(set(manifest["kinds"]), {"service", "overlay", "bar-widget"})
         for entry_point in manifest["entryPoints"].values():
             self.assertFalse(Path(entry_point).is_absolute())
             self.assertNotIn("..", Path(entry_point).parts)
             self.assertTrue((ROOT / entry_point).is_file(), entry_point)
         defaults = manifest["barWidget"]["defaults"]
+        self.assertEqual(defaults["earthquakeRefreshMinutes"], 5)
         self.assertEqual(defaults["alertRegion"], "Off")
         self.assertTrue(defaults["onlinePlaceSearch"])
         self.assertEqual(defaults["formationThreshold"], "Medium (40%)")
@@ -43,7 +44,7 @@ class PluginContractTests(unittest.TestCase):
 
         entry = parser["Desktop Entry"]
         self.assertEqual(entry["Type"], "Application")
-        self.assertEqual(entry["Name"], "Hurricane Tracker")
+        self.assertEqual(entry["Name"], "Hurricane + Earthquake Tracker")
         self.assertEqual(
             entry["Exec"],
             "omarchy-shell shell summon io.github.olivoil.hurricane-tracker {}",
@@ -90,11 +91,17 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('readonly property var trackerDefinitions:', overlay)
         self.assertIn('title: "HURRICANE TRACKER"', overlay)
         self.assertIn('title: "EARTHQUAKE TRACKER"', overlay)
+        self.assertIn('state: root.earthquakeCount + " IN 7 DAYS"', overlay)
+        self.assertIn('available: true', overlay)
+        self.assertIn('readonly property var earthquakeRows:', overlay)
+        self.assertIn('mode: root.sidebarMode === "alerts" ? "cyclones" : root.activeTrackerId', overlay)
+        self.assertIn('section.property: root.earthquakeMode ? "sectionName" : ""', overlay)
+        self.assertIn('height: activeSection ? Style.space(44) : 0', overlay)
         self.assertIn('id: alertsButton', overlay)
         self.assertIn('anchors.right: closeButton.left', overlay)
         self.assertIn('id: trackerMenuPanel', overlay)
         self.assertIn('id: dataFooter', overlay)
-        self.assertIn('readonly property var regionalRows: Model.regionalRows(storms, outlooks)', overlay)
+        self.assertIn('? earthquakeRows : Model.regionalRows(storms, outlooks)', overlay)
         self.assertNotIn('Model.disclosedRegionalRows(', overlay)
         self.assertNotIn('function toggleRegion(', overlay)
         self.assertNotIn('text: "Systems"', overlay)
@@ -111,9 +118,59 @@ class PluginContractTests(unittest.TestCase):
             "function openOfficial", 1
         )[0]
         self.assertIn("dismiss()", open_browser)
-        self.assertIn('onClicked: root.openBrowser("https://www.nhc.noaa.gov/")', overlay)
+        self.assertIn('onClicked: root.openBrowser(root.sourceUrl)', overlay)
         self.assertIn('placeholderText: "Home, Beach House, Mom’s Place"', overlay)
         self.assertNotIn("Home, Dad", overlay)
+
+    def test_earthquake_refresh_state_is_independent_from_tropical_alerts(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        self.assertIn("property var earthquakePayload:", service)
+        self.assertIn("property var earthquakes: []", service)
+        self.assertIn("function refreshTropical()", service)
+        self.assertIn("function refreshEarthquakes()", service)
+        self.assertIn('[backendPath, "fetch-earthquakes"]', service)
+        self.assertIn("id: earthquakeFetchProcess", service)
+        self.assertIn("id: earthquakeRefreshTimer", service)
+        self.assertIn("onTriggered: root.refreshTropical()", service)
+        self.assertIn("onTriggered: root.refreshEarthquakes()", service)
+
+    def test_earthquake_list_is_sticky_and_collapsible(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        self.assertIn("ViewSection.CurrentLabelAtStart", overlay)
+        self.assertIn("function toggleEarthquakeSection(sectionName)", overlay)
+        self.assertIn("id: earthquakeSectionHeader", overlay)
+        self.assertIn("function revealIndex(index)", overlay)
+
+    def test_activity_sidebar_routes_wheel_input_across_every_surface(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        header = overlay.split("id: listHeader", 1)[1].split(
+            "id: trackerMenuPanel", 1
+        )[0]
+        activity_list = overlay.split("id: systemList", 1)[1].split(
+            "id: watchPlacesPanel", 1
+        )[0]
+        footer = overlay.split("id: dataFooter", 1)[1].split(
+            "id: discussionPanel", 1
+        )[0]
+        discussion = overlay.split("id: discussionPanel", 1)[1]
+
+        self.assertIn("function routeActivityWheel(event, detailFirst)", overlay)
+        self.assertIn("Model.wheelScrollDistance(", overlay)
+        self.assertIn("root.routeActivityWheel(event, false)", header)
+        self.assertIn("root.routeActivityWheel(event, false)", activity_list)
+        self.assertIn("root.routeActivityWheel(event, false)", footer)
+        self.assertIn("root.routeActivityWheel(event, true)", discussion)
+        self.assertIn("discussionScroll.scrollByPixels(remaining)", overlay)
+        self.assertIn("systemList.scrollByPixels(remaining)", overlay)
+        self.assertNotIn("event.pixelDelta.y !== 0", activity_list)
+        self.assertIn("Style.space(272)", overlay)
+
+    def test_map_renders_only_the_active_hazard_layer(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        self.assertIn('property string mode: "cyclones"', storm_map)
+        self.assertIn("function drawEarthquakeMarker", storm_map)
+        self.assertIn('if (mode === "earthquakes")', storm_map)
+        self.assertIn("drawEarthquakeMarker(context, systems[e])", storm_map)
 
     def test_alerts_button_and_shortcut_share_toggle_navigation(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
@@ -164,10 +221,10 @@ class PluginContractTests(unittest.TestCase):
             'if (sidebarMode === "alerts") regionOverviewBasin = ""',
             sidebar_mode_change,
         )
-        self.assertIn("if (regionOverviewBasin)", sync_selection)
+        self.assertIn("if (!earthquakeMode && regionOverviewBasin)", sync_selection)
         self.assertIn("fitRegionOverview(regionOverviewBasin)", sync_selection)
         self.assertLess(
-            sync_selection.index("if (regionOverviewBasin)"),
+            sync_selection.index("if (!earthquakeMode && regionOverviewBasin)"),
             sync_selection.index("Model.selectedKeyAfterRefresh"),
         )
         self.assertIn("regionOverviewBasin = basin", view_region)

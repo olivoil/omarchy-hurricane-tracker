@@ -2,6 +2,17 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value)))
 }
 
+function wheelScrollDistance(pixelDeltaY, angleDeltaY, discreteStep) {
+  var pixels = Number(pixelDeltaY)
+  if (isFinite(pixels) && pixels !== 0) return -pixels
+
+  var angle = Number(angleDeltaY)
+  if (!isFinite(angle) || angle === 0) return 0
+  var step = Number(discreteStep)
+  if (!isFinite(step) || step <= 0) step = 272
+  return -angle / 120 * step
+}
+
 function wrapLongitude(value) {
   var wrapped = (Number(value) + 180) % 360
   if (wrapped < 0) wrapped += 360
@@ -70,6 +81,12 @@ function stormCoordinates(storm) {
   return output
 }
 
+function earthquakeCoordinates(earthquake) {
+  var output = []
+  pushCoordinate(output, earthquake)
+  return output
+}
+
 function stormBounds(storm) {
   var coordinates = stormCoordinates(storm)
   var reference = storm && validCoordinate(storm.latitude, storm.longitude)
@@ -127,12 +144,15 @@ function boundsForCoordinates(coordinates, referenceLongitude, fallback) {
 
 function systemKind(system) {
   if (!system) return ""
+  if (String(system.kind || "") === "earthquake" || system.magnitude !== undefined) return "earthquake"
   if (String(system.kind || "") === "outlook" || system.sevenDayChance !== undefined) return "outlook"
   return "storm"
 }
 
 function systemCoordinates(system) {
-  return systemKind(system) === "outlook" ? outlookCoordinates(system) : stormCoordinates(system)
+  var kind = systemKind(system)
+  if (kind === "earthquake") return earthquakeCoordinates(system)
+  return kind === "outlook" ? outlookCoordinates(system) : stormCoordinates(system)
 }
 
 function systemKey(system) {
@@ -161,6 +181,57 @@ function orderedSystems(storms, outlooks) {
       if (String(developing[o] && developing[o].basin || "") === basins[b]) output.push(copySystem(developing[o], "outlook"))
     }
   }
+  return output
+}
+
+function orderedEarthquakes(earthquakes) {
+  var rows = Array.isArray(earthquakes) ? earthquakes : []
+  var output = []
+  for (var i = 0; i < rows.length; i++) output.push(copySystem(rows[i], "earthquake"))
+  output.sort(function(first, second) {
+    var firstTime = Date.parse(String(first && first.occurredAt || ""))
+    var secondTime = Date.parse(String(second && second.occurredAt || ""))
+    if (!isFinite(firstTime)) firstTime = 0
+    if (!isFinite(secondTime)) secondTime = 0
+    return secondTime - firstTime
+  })
+  return output
+}
+
+function earthquakeSectionName(earthquake, nowMilliseconds) {
+  var now = nowMilliseconds === undefined ? Date.now() : Number(nowMilliseconds)
+  var cutoff = now - 24 * 60 * 60 * 1000
+  var occurred = Date.parse(String(earthquake && earthquake.occurredAt || ""))
+  return isFinite(occurred) && occurred >= cutoff ? "Past 24 hours" : "Earlier this week"
+}
+
+function earthquakeRows(earthquakes, nowMilliseconds, collapsedSections) {
+  var systems = orderedEarthquakes(earthquakes)
+  if (systems.length === 0) return [{ kind: "empty", name: "Earthquakes", sectionName: "" }]
+  var now = nowMilliseconds === undefined ? Date.now() : Number(nowMilliseconds)
+  var recent = []
+  var earlier = []
+  for (var i = 0; i < systems.length; i++) {
+    if (earthquakeSectionName(systems[i], now) === "Past 24 hours") recent.push(systems[i])
+    else earlier.push(systems[i])
+  }
+  var output = []
+  function appendSection(name, rows) {
+    if (rows.length === 0) return
+    output.push({ kind: "section-anchor", name: name, sectionName: name, count: rows.length })
+    if (collapsedSections && collapsedSections[name] === true) return
+    for (var index = 0; index < rows.length; index++) {
+      output.push({
+        kind: "system",
+        key: rows[index].key,
+        system: rows[index],
+        sectionName: name,
+        count: rows.length
+      })
+    }
+  }
+  appendSection("Past 24 hours", recent)
+  appendSection("Earlier this week", earlier)
   return output
 }
 
@@ -218,7 +289,16 @@ function selectedKeyAfterRefresh(systems, selectedKey) {
 }
 
 function systemBounds(system) {
-  if (systemKind(system) === "outlook") {
+  var kind = systemKind(system)
+  if (kind === "earthquake") {
+    return {
+      centreLatitude: clamp(Number(system && system.latitude || 0), -75, 75),
+      centreLongitude: wrapLongitude(Number(system && system.longitude || 0)),
+      latitudeSpan: 12,
+      longitudeSpan: 18
+    }
+  }
+  if (kind === "outlook") {
     return boundsForCoordinates(
       outlookCoordinates(system),
       system && system.longitude,
@@ -367,6 +447,59 @@ function outlookColor(outlook) {
   return "#62abc0"
 }
 
+function earthquakeColor(earthquake) {
+  var alert = String(earthquake && earthquake.pagerAlert || "").toLowerCase()
+  if (alert === "red") return "#d84e68"
+  if (alert === "orange") return "#ed6c58"
+  if (alert === "yellow") return "#e9be62"
+  if (alert === "green") return "#45c6b5"
+  return "#89aab1"
+}
+
+function earthquakeMagnitudeLabel(earthquake) {
+  var magnitude = Number(earthquake && earthquake.magnitude)
+  return isFinite(magnitude) ? "M" + magnitude.toFixed(1) : "M?"
+}
+
+function formatDepth(earthquake) {
+  var depth = Number(earthquake && earthquake.depthKm)
+  if (!isFinite(depth)) return "Depth unavailable"
+  if (depth < 1) return "Less than 1 km deep"
+  return Math.round(depth) + " km deep"
+}
+
+function romanIntensity(value) {
+  var intensity = Math.round(Number(value))
+  var labels = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+  return isFinite(intensity) && intensity >= 1 ? labels[clamp(intensity, 1, 10)] : ""
+}
+
+function formatMaximumIntensity(earthquake) {
+  var estimated = romanIntensity(earthquake && earthquake.estimatedIntensity)
+  if (estimated) return "MMI " + estimated + " estimated"
+  var reported = romanIntensity(earthquake && earthquake.reportedIntensity)
+  return reported ? "MMI " + reported + " reported" : "Unavailable"
+}
+
+function formatFeltReports(earthquake) {
+  var value = earthquake && earthquake.feltReports
+  if (value === undefined || value === null || !isFinite(Number(value))) return "Unavailable"
+  var count = Math.max(0, Math.round(Number(value)))
+  return count === 0 ? "None reported" : groupedInteger(count)
+}
+
+function earthquakeReviewLabel(earthquake) {
+  var status = String(earthquake && earthquake.reviewStatus || "").toLowerCase()
+  if (status === "reviewed") return "Reviewed earthquake"
+  if (status === "automatic") return "Automatic earthquake"
+  return "Earthquake"
+}
+
+function earthquakeImpactLabel(earthquake) {
+  var alert = String(earthquake && earthquake.pagerAlert || "").toLowerCase()
+  return alert ? "PAGER " + alert.charAt(0).toUpperCase() + alert.slice(1) : "No PAGER estimate"
+}
+
 function outlookChanceLabel(outlook) {
   var twoDay = Math.max(0, Math.round(Number(outlook && outlook.twoDayChance || 0)))
   var sevenDay = Math.max(0, Math.round(Number(outlook && outlook.sevenDayChance || 0)))
@@ -374,17 +507,35 @@ function outlookChanceLabel(outlook) {
 }
 
 function systemClassificationLabel(system) {
-  if (systemKind(system) === "outlook") return String(system.classificationLabel || "Developing system")
+  var kind = systemKind(system)
+  if (kind === "earthquake") return earthquakeReviewLabel(system)
+  if (kind === "outlook") return String(system.classificationLabel || "Developing system")
   return classificationLabel(system)
 }
 
 function systemMetric(system, useImperial) {
-  return systemKind(system) === "outlook"
-    ? outlookChanceLabel(system) : formatWind(system, useImperial)
+  var kind = systemKind(system)
+  if (kind === "earthquake") return formatDepth(system) + " · " + humanAge(system.occurredAt)
+  return kind === "outlook" ? outlookChanceLabel(system) : formatWind(system, useImperial)
 }
 
 function discussionExcerpt(system) {
+  if (systemKind(system) === "earthquake") return earthquakeNarrative(system)
   return String(system && system.discussionExcerpt || "")
+}
+
+function earthquakeNarrative(earthquake) {
+  if (!earthquake) return ""
+  var review = earthquakeReviewLabel(earthquake).toLowerCase()
+  var parts = ["USGS reports a " + review + " at " + formatDepth(earthquake) + "."]
+  var shaking = formatMaximumIntensity(earthquake)
+  if (shaking !== "Unavailable") parts.push("Maximum shaking: " + shaking + ".")
+  var felt = formatFeltReports(earthquake)
+  if (felt !== "Unavailable") parts.push("Felt reports: " + felt + ".")
+  if (String(earthquake.pagerAlert || "")) parts.push(earthquakeImpactLabel(earthquake) + " impact estimate.")
+  if (earthquake.tsunamiInfo === true)
+    parts.push("Tsunami information is available from NOAA; the USGS flag is not a warning.")
+  return parts.join(" ")
 }
 
 function groupedInteger(value) {
@@ -502,7 +653,10 @@ function safeOfficialUrl(value) {
   var slash = rest.indexOf("/")
   var host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase()
   if (host.indexOf("@") !== -1 || host.indexOf(":") !== -1) return ""
-  return ["nhc.noaa.gov", "www.nhc.noaa.gov", "hurricanes.gov", "www.hurricanes.gov"].indexOf(host) !== -1 ? url : ""
+  return [
+    "nhc.noaa.gov", "www.nhc.noaa.gov", "hurricanes.gov", "www.hurricanes.gov",
+    "earthquake.usgs.gov", "www.tsunami.gov", "tsunami.gov"
+  ].indexOf(host) !== -1 ? url : ""
 }
 
 function activeSummary(storms) {
@@ -522,6 +676,12 @@ function trackingSummary(storms, outlooks) {
   if (active.length > 0) parts.push(active.length + (active.length === 1 ? " active cyclone" : " active cyclones"))
   if (developing.length > 0) parts.push(developing.length + (developing.length === 1 ? " outlook area" : " outlook areas"))
   return parts.join(" · ")
+}
+
+function earthquakeSummary(earthquakes) {
+  var rows = Array.isArray(earthquakes) ? earthquakes : []
+  if (rows.length === 0) return "No M4.5+ earthquakes in the past week"
+  return rows.length + (rows.length === 1 ? " M4.5+ earthquake" : " M4.5+ earthquakes") + " in the past week"
 }
 
 var EARTH_RADIUS_KM = 6371.0088

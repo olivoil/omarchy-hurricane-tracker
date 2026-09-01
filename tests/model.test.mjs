@@ -14,6 +14,10 @@ assert.equal(model.wrapLongitude(190), -170)
 assert.equal(model.longitudeNear(170, -175), 185)
 assert.equal(model.validCoordinate(20, -70), true)
 assert.equal(model.validCoordinate(100, -70), false)
+assert.equal(model.wheelScrollDistance(18, 120, 272), -18)
+assert.equal(model.wheelScrollDistance(0, 120, 272), -272)
+assert.equal(model.wheelScrollDistance(0, -60, 272), 136)
+assert.equal(model.wheelScrollDistance(0, 0, 272), 0)
 
 const storm = {
   id: "al012026",
@@ -947,3 +951,69 @@ assert.equal(model.activeSummary([storm]), "1 active cyclone: Ada")
 assert.equal(model.selectedIndexAfterRefresh([storm], "al012026"), 0)
 assert.equal(model.selectedIndexAfterRefresh([storm], "missing"), 0)
 assert.equal(model.trackingSummary([storm], [outlook]), "1 active cyclone · 1 outlook area")
+
+const earthquake = {
+  id: "us7000test1",
+  kind: "earthquake",
+  name: "42 km W of Test Coast",
+  magnitude: 6.14,
+  latitude: 18.75,
+  longitude: -101.25,
+  depthKm: 12.4,
+  occurredAt: "2026-08-29T12:34:56Z",
+  updatedAt: "2026-08-29T13:00:00Z",
+  reviewStatus: "reviewed",
+  estimatedIntensity: 6.2,
+  reportedIntensity: 5.4,
+  feltReports: 123,
+  pagerAlert: "yellow",
+  tsunamiInfo: true,
+  officialUrl: "https://earthquake.usgs.gov/earthquakes/eventpage/us7000test1"
+}
+
+assert.equal(model.systemKind(earthquake), "earthquake")
+assert.equal(model.systemKey(earthquake), "earthquake:us7000test1")
+assert.equal(model.earthquakeMagnitudeLabel(earthquake), "M6.1")
+assert.equal(model.earthquakeColor(earthquake), "#e9be62")
+assert.equal(model.formatDepth(earthquake), "12 km deep")
+assert.equal(model.formatDepth({ depthKm: -1.2 }), "Less than 1 km deep")
+assert.equal(model.formatMaximumIntensity(earthquake), "MMI VI estimated")
+assert.equal(model.formatFeltReports(earthquake), "123")
+assert.equal(model.earthquakeImpactLabel(earthquake), "PAGER Yellow")
+assert.equal(model.systemClassificationLabel(earthquake), "Reviewed earthquake")
+assert.ok(model.discussionExcerpt(earthquake).includes("USGS flag is not a warning"))
+assert.equal(model.systemCoordinates(earthquake).length, 1)
+assert.equal(model.systemBounds(earthquake).centreLongitude, -101.25)
+assert.equal(model.safeOfficialUrl(earthquake.officialUrl), earthquake.officialUrl)
+assert.equal(model.safeOfficialUrl("https://earthquake.usgs.gov.attacker.example/event"), "")
+
+const olderEarthquake = {
+  ...earthquake,
+  id: "us7000test2",
+  occurredAt: "2026-08-27T10:00:00Z",
+  pagerAlert: ""
+}
+const earthquakeSystems = model.orderedEarthquakes([olderEarthquake, earthquake])
+assert.deepEqual(Array.from(earthquakeSystems, item => item.key), [
+  "earthquake:us7000test1", "earthquake:us7000test2"
+])
+const earthquakeRows = model.earthquakeRows(
+  [olderEarthquake, earthquake], Date.parse("2026-08-29T14:00:00Z")
+)
+assert.equal(earthquakeRows[0].kind, "section-anchor")
+assert.equal(earthquakeRows[0].name, "Past 24 hours")
+assert.equal(earthquakeRows[0].count, 1)
+assert.equal(earthquakeRows[1].sectionName, "Past 24 hours")
+assert.equal(earthquakeRows[2].name, "Earlier this week")
+assert.equal(model.earthquakeSectionName(
+  earthquake, Date.parse("2026-08-29T14:00:00Z")
+), "Past 24 hours")
+const collapsedEarthquakeRows = model.earthquakeRows(
+  [olderEarthquake, earthquake],
+  Date.parse("2026-08-29T14:00:00Z"),
+  { "Earlier this week": true }
+)
+assert.equal(collapsedEarthquakeRows.filter(row => row.kind === "section-anchor").length, 2)
+assert.equal(collapsedEarthquakeRows.filter(row => row.kind === "system").length, 1)
+assert.equal(collapsedEarthquakeRows[2].name, "Earlier this week")
+assert.equal(model.earthquakeSummary([earthquake, olderEarthquake]), "2 M4.5+ earthquakes in the past week")

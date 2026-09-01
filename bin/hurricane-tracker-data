@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch and normalize National Hurricane Center tropical weather data.
+"""Fetch and normalize official tropical weather and earthquake data.
 
 The Omarchy shell consumes a deliberately small JSON contract from this
 helper. Network and archive handling stay outside the long-running QML process,
@@ -31,9 +31,13 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 
-VERSION = "0.0.1"
+VERSION = "0.1.0"
 CURRENT_STORMS_URL = "https://www.nhc.noaa.gov/CurrentStorms.json"
 SOURCE_URL = "https://www.nhc.noaa.gov/"
+EARTHQUAKES_URL = (
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson"
+)
+EARTHQUAKE_SOURCE_URL = "https://earthquake.usgs.gov/earthquakes/"
 OUTLOOK_URLS = {
     "al": "https://www.nhc.noaa.gov/xgtwo/gtwo_atl.kmz",
     "ep": "https://www.nhc.noaa.gov/xgtwo/gtwo_pac.kmz",
@@ -51,7 +55,9 @@ ALLOWED_HOSTS = frozenset(
         "www.hurricanes.gov",
     }
 )
+EARTHQUAKE_ALLOWED_HOSTS = frozenset({"earthquake.usgs.gov"})
 MAX_CURRENT_BYTES = 1_000_000
+MAX_EARTHQUAKE_BYTES = 2_000_000
 MAX_KMZ_BYTES = 10_000_000
 MAX_KML_BYTES = 18_000_000
 MAX_TEXT_BYTES = 750_000
@@ -61,6 +67,7 @@ MAX_OPEN_METEO_RESPONSE_BYTES = 64 * 1024
 MAX_NOMINATIM_RESPONSE_BYTES = 64 * 1024
 MAX_STORMS = 20
 MAX_OUTLOOKS = 24
+MAX_EARTHQUAKES = 500
 MAX_WATCH_PLACES = 12
 MAX_PLACE_SEARCH_RESULTS = 8
 MAX_PLACE_SEARCH_QUERY_CHARS = 120
@@ -143,6 +150,10 @@ def cache_path() -> Path:
     return xdg_base_path("XDG_CACHE_HOME", ".cache") / "hurricane-tracker" / "storms.json"
 
 
+def earthquake_cache_path() -> Path:
+    return cache_path().with_name("earthquakes.json")
+
+
 def watch_config_path() -> Path:
     return (
         xdg_base_path("XDG_CONFIG_HOME", ".config")
@@ -154,6 +165,17 @@ def watch_config_path() -> Path:
 def safe_text(value: Any, limit: int = 160) -> str:
     text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
     return " ".join(text.split())[:limit]
+
+
+def iso_from_epoch_milliseconds(value: Any) -> str:
+    milliseconds = number(value)
+    if milliseconds is None:
+        return ""
+    try:
+        moment = dt.datetime.fromtimestamp(milliseconds / 1000, tz=dt.timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return ""
+    return moment.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def readable_excerpt(value: Any, limit: int = 900) -> str:
@@ -196,6 +218,21 @@ def is_safe_url(url: str) -> bool:
     return (
         parsed.scheme == "https"
         and (parsed.hostname or "").lower() in ALLOWED_HOSTS
+        and not parsed.username
+        and not parsed.password
+    )
+
+
+def is_safe_earthquake_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() in EARTHQUAKE_ALLOWED_HOSTS
+        and port in (None, 443)
         and not parsed.username
         and not parsed.password
     )
@@ -354,6 +391,11 @@ def safe_remote_url(value: Any) -> str:
     return url if is_safe_url(url) else ""
 
 
+def safe_earthquake_url(value: Any) -> str:
+    url = safe_text(value, 2048)
+    return url if is_safe_earthquake_url(url) else ""
+
+
 def fetch_bytes(url: str, maximum: int, timeout: int = 18) -> bytes:
     return fetch_direct_bytes(
         url,
@@ -362,6 +404,18 @@ def fetch_bytes(url: str, maximum: int, timeout: int = 18) -> bytes:
         "NHC",
         "application/json, application/vnd.google-earth.kmz, application/xml;q=0.9, */*;q=0.2",
         timeout,
+    )
+
+
+def fetch_earthquake_bytes(url: str, maximum: int, timeout: int = 18) -> bytes:
+    return fetch_direct_bytes(
+        url,
+        maximum,
+        is_safe_earthquake_url,
+        "USGS",
+        "application/geo+json, application/json;q=0.9",
+        timeout,
+        require_json=True,
     )
 
 
@@ -1259,11 +1313,134 @@ def base_storm(storm: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     return normalized, urls
 
 
+def parse_earthquake_feed(data: bytes) -> tuple[list[dict[str, Any]], str]:
+    try:
+        document = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DataError("USGS earthquake data was not valid JSON") from error
+    if not isinstance(document, dict) or document.get("type") != "FeatureCollection":
+        raise DataError("USGS earthquake data was not a GeoJSON feature collection")
+    features = document.get("features")
+    if not isinstance(features, list):
+        raise DataError("USGS earthquake data did not contain features")
+
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    generated_at = iso_from_epoch_milliseconds(metadata.get("generated")) or utc_now()
+    events: list[dict[str, Any]] = []
+    for feature in features[: MAX_EARTHQUAKES * 2]:
+        if not isinstance(feature, dict):
+            continue
+        properties = feature.get("properties")
+        geometry = feature.get("geometry")
+        if not isinstance(properties, dict) or not isinstance(geometry, dict):
+            continue
+        if str(properties.get("type") or "").lower() != "earthquake":
+            continue
+        coordinates = geometry.get("coordinates")
+        if (
+            geometry.get("type") != "Point"
+            or not isinstance(coordinates, list)
+            or len(coordinates) < 3
+        ):
+            continue
+        longitude = number(coordinates[0])
+        latitude = number(coordinates[1])
+        depth = number(coordinates[2])
+        magnitude = number(properties.get("mag"))
+        event_id = safe_text(feature.get("id"), 96)
+        occurred_at = iso_from_epoch_milliseconds(properties.get("time"))
+        if (
+            not event_id
+            or magnitude is None
+            or magnitude < 4.5
+            or magnitude > 10
+            or latitude is None
+            or latitude < -90
+            or latitude > 90
+            or longitude is None
+            or longitude < -180
+            or longitude > 180
+            or depth is None
+            or depth < -20
+            or depth > 1000
+            or not occurred_at
+        ):
+            continue
+
+        alert = safe_text(properties.get("alert"), 12).lower()
+        if alert not in {"green", "yellow", "orange", "red"}:
+            alert = ""
+        status = safe_text(properties.get("status"), 20).lower()
+        if status not in {"automatic", "reviewed"}:
+            status = "unknown"
+        felt_value = properties.get("felt")
+        reported_intensity = number(properties.get("cdi"))
+        estimated_intensity = number(properties.get("mmi"))
+        if reported_intensity is not None and not 0 <= reported_intensity <= 10:
+            reported_intensity = None
+        if estimated_intensity is not None and not 0 <= estimated_intensity <= 10:
+            estimated_intensity = None
+        events.append(
+            {
+                "id": event_id,
+                "kind": "earthquake",
+                "name": safe_text(properties.get("place") or "Unnamed location", 180),
+                "title": safe_text(properties.get("title") or "Earthquake", 220),
+                "magnitude": round(magnitude, 2),
+                "magnitudeType": safe_text(properties.get("magType"), 16),
+                "latitude": round(latitude, 5),
+                "longitude": round(longitude, 5),
+                "depthKm": round(depth, 2),
+                "occurredAt": occurred_at,
+                "updatedAt": iso_from_epoch_milliseconds(properties.get("updated")) or occurred_at,
+                "reviewStatus": status,
+                "significance": max(0, integer(properties.get("sig"))),
+                "feltReports": max(0, integer(felt_value)) if felt_value is not None else None,
+                "reportedIntensity": reported_intensity,
+                "estimatedIntensity": estimated_intensity,
+                "pagerAlert": alert,
+                "tsunamiInfo": integer(properties.get("tsunami")) == 1,
+                "network": safe_text(properties.get("net"), 16).upper(),
+                "officialUrl": safe_earthquake_url(properties.get("url")),
+                "detailUrl": safe_earthquake_url(properties.get("detail")),
+            }
+        )
+
+    events.sort(key=lambda event: event["occurredAt"], reverse=True)
+    return events[:MAX_EARTHQUAKES], generated_at
+
+
 def source_metadata() -> dict[str, str]:
     return {
         "name": "NOAA National Hurricane Center",
         "url": SOURCE_URL,
         "coverage": "Atlantic, Eastern Pacific, and Central Pacific basins",
+    }
+
+
+def earthquake_source_metadata() -> dict[str, str]:
+    return {
+        "name": "USGS Earthquake Hazards Program",
+        "url": EARTHQUAKE_SOURCE_URL,
+        "coverage": "Worldwide magnitude 4.5+ earthquakes from the past seven days",
+    }
+
+
+def build_earthquake_payload(
+    fetcher: Callable[[str, int], bytes] = fetch_earthquake_bytes,
+) -> dict[str, Any]:
+    events, generated_at = parse_earthquake_feed(
+        fetcher(EARTHQUAKES_URL, MAX_EARTHQUAKE_BYTES)
+    )
+    return {
+        "schemaVersion": 1,
+        "status": "fresh",
+        "stale": False,
+        "fetchedAt": generated_at,
+        "checkedAt": utc_now(),
+        "source": earthquake_source_metadata(),
+        "error": "",
+        "events": events,
     }
 
 
@@ -1417,6 +1594,57 @@ def write_cache(payload: dict[str, Any], path: Path | None = None) -> None:
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=target.parent, prefix=".storms.", delete=False
+        ) as temporary:
+            temporary_name = temporary.name
+            os.chmod(temporary_name, 0o600)
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, target)
+    finally:
+        if temporary_name:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def valid_earthquake_payload(payload: Any) -> bool:
+    return (
+        isinstance(payload, dict)
+        and payload.get("schemaVersion") == 1
+        and isinstance(payload.get("events"), list)
+        and len(payload["events"]) <= MAX_EARTHQUAKES
+    )
+
+
+def read_earthquake_cache(path: Path | None = None) -> dict[str, Any] | None:
+    target = path or earthquake_cache_path()
+    try:
+        if not target.is_file() or target.stat().st_size > MAX_CACHE_BYTES:
+            return None
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if valid_earthquake_payload(payload) else None
+
+
+def write_earthquake_cache(
+    payload: dict[str, Any], path: Path | None = None
+) -> None:
+    target = path or earthquake_cache_path()
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_CACHE_BYTES:
+        raise DataError("normalized earthquake data exceeded the cache size limit")
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target.parent,
+            prefix=".earthquakes.",
+            delete=False,
         ) as temporary:
             temporary_name = temporary.name
             os.chmod(temporary_name, 0o600)
@@ -1599,6 +1827,44 @@ def fetch_with_fallback(
         )
 
 
+def unavailable_earthquake_payload(
+    message: str, cached: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    if cached:
+        payload = copy.deepcopy(cached)
+        payload["status"] = "cached"
+        payload["stale"] = True
+        payload["checkedAt"] = utc_now()
+        payload["error"] = message
+        return payload
+    return {
+        "schemaVersion": 1,
+        "status": "error",
+        "stale": False,
+        "fetchedAt": "",
+        "checkedAt": utc_now(),
+        "source": earthquake_source_metadata(),
+        "error": message,
+        "events": [],
+    }
+
+
+def fetch_earthquakes_with_fallback(
+    fetcher: Callable[[str, int], bytes] = fetch_earthquake_bytes,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    try:
+        payload = build_earthquake_payload(fetcher)
+        write_earthquake_cache(payload, path)
+        return payload
+    except Exception as error:
+        print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
+        return unavailable_earthquake_payload(
+            "The USGS earthquake feed is unavailable. Showing saved events when possible.",
+            read_earthquake_cache(path),
+        )
+
+
 def emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
@@ -1608,6 +1874,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("fetch", help="Fetch live NHC data, falling back to the local cache")
     subparsers.add_parser("cache", help="Print the last cached response without using the network")
+    subparsers.add_parser(
+        "fetch-earthquakes",
+        help="Fetch recent USGS earthquakes, falling back to the local cache",
+    )
+    subparsers.add_parser(
+        "earthquake-cache",
+        help="Print the last cached earthquake response without using the network",
+    )
     subparsers.add_parser("watch-load", help="Print locally saved watch places")
     watch_save = subparsers.add_parser("watch-save", help="Validate and save watch places locally")
     watch_save.add_argument("payload", help="JSON watch-place payload")
@@ -1624,6 +1898,24 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     if args.command == "fetch":
         emit(fetch_with_fallback())
+        return 0
+
+    if args.command == "fetch-earthquakes":
+        emit(fetch_earthquakes_with_fallback())
+        return 0
+
+    if args.command == "earthquake-cache":
+        cached = read_earthquake_cache()
+        if cached:
+            payload = copy.deepcopy(cached)
+            payload["status"] = "cached"
+            payload["stale"] = True
+            payload["checkedAt"] = utc_now()
+            emit(payload)
+            return 0
+        emit(unavailable_earthquake_payload(
+            "No saved USGS earthquake data is available yet."
+        ))
         return 0
 
     if args.command == "watch-load":

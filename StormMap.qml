@@ -7,14 +7,18 @@ Item {
 
   property var storms: []
   property var outlooks: []
+  property var earthquakes: []
   property var watchPlaces: []
+  property string mode: "cyclones"
   property string selectedKey: ""
   property string selectedPlaceId: ""
   property bool autoFitSelection: true
   property bool placementMode: false
   property var draftWatchPlace: null
   property bool useImperial: false
-  readonly property var systems: Model.orderedSystems(storms, outlooks)
+  property bool preferOverview: false
+  readonly property var systems: mode === "earthquakes"
+    ? Model.orderedEarthquakes(earthquakes) : Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property bool selectedIsStorm: selectedSystem && selectedSystem.kind === "storm"
 
@@ -59,10 +63,12 @@ Item {
   signal placePicked(real latitude, real longitude)
   signal pointerActivity()
 
-  Accessible.name: "NHC tropical systems map"
+  Accessible.name: mode === "earthquakes" ? "Recent earthquakes map" : "NHC tropical systems map"
   Accessible.description: placementMode
     ? "Click the map to place a watch point, drag to pan, or use the wheel to zoom"
-    : "Drag to pan or rotate the globe, use the wheel to zoom, and select a cyclone, outlook, or watched-location marker"
+    : (mode === "earthquakes"
+      ? "Drag to pan or rotate the globe, use the wheel to zoom, and select an earthquake marker"
+      : "Drag to pan or rotate the globe, use the wheel to zoom, and select a cyclone, outlook, or watched-location marker")
   Accessible.role: Accessible.Pane
 
   function coordinateLatitude(value) {
@@ -153,7 +159,7 @@ Item {
     if (!autoFitSelection || (!forceFit && userMoved)) return
     Qt.callLater(function() {
       if (!root.autoFitSelection || (!forceFit && root.userMoved)) return
-      root.fitSelected()
+      root.syncSelectionView()
     })
   }
 
@@ -203,6 +209,11 @@ Item {
   function zoomOut() { zoomAt(1 / 1.32) }
   function resetView() { fitSelected() }
 
+  function syncSelectionView() {
+    if (mode === "earthquakes" && preferOverview) showGlobe()
+    else fitSelected()
+  }
+
   function clearHover() {
     hoveredKey = ""
     hoveredPlaceId = ""
@@ -229,6 +240,7 @@ Item {
   }
 
   function nearestWatchPlace(x, y, radius) {
+    if (mode !== "cyclones") return null
     var rows = Array.isArray(watchPlaces) ? watchPlaces : []
     var best = null
     var bestDistance = radius
@@ -265,7 +277,7 @@ Item {
   function updateHover(x, y) {
     hoverX = x
     hoverY = y
-    var forecast = nearestForecastPoint(x, y, 13)
+    var forecast = mode === "cyclones" ? nearestForecastPoint(x, y, 13) : null
     if (forecast) {
       hoveredPoint = forecast
       hoveredKey = ""
@@ -280,9 +292,11 @@ Item {
     hoveredKey = system ? system.key : ""
     hoveredPlaceId = ""
     if (system) {
-      hoverTitle = String(system.name || system.title || "Tropical system")
-      hoverDetail = Model.systemClassificationLabel(system) + " · "
-        + Model.systemMetric(system, useImperial)
+      hoverTitle = String(system.name || system.title || (mode === "earthquakes"
+        ? "Earthquake" : "Tropical system"))
+      hoverDetail = system.kind === "earthquake"
+        ? Model.earthquakeMagnitudeLabel(system) + " · " + Model.systemMetric(system, useImperial)
+        : Model.systemClassificationLabel(system) + " · " + Model.systemMetric(system, useImperial)
     } else {
       var place = nearestWatchPlace(x, y, 16)
       hoveredPlaceId = place ? place.id : ""
@@ -620,6 +634,68 @@ Item {
     }
   }
 
+  function earthquakeRadius(earthquake, selected) {
+    var magnitude = Model.clamp(Number(earthquake && earthquake.magnitude || 4.5), 4.5, 9.5)
+    return Model.clamp(6 + (magnitude - 4.5) * 2.6 + (selected ? 2 : 0), 6, 20)
+  }
+
+  function earthquakeAgeOpacity(earthquake) {
+    var occurred = Date.parse(String(earthquake && earthquake.occurredAt || ""))
+    if (!isFinite(occurred)) return 0.62
+    var hours = Math.max(0, (Date.now() - occurred) / (60 * 60 * 1000))
+    if (hours <= 24) return 0.92
+    return Model.clamp(0.82 - (hours - 24) / (6 * 24) * 0.34, 0.48, 0.82)
+  }
+
+  function drawEarthquakeMarker(context, earthquake) {
+    if (!earthquake || !Model.validCoordinate(earthquake.latitude, earthquake.longitude)) return
+    var point = project(earthquake.latitude, earthquake.longitude)
+    if (!point.visible || point.x < -70 || point.x > width + 70
+        || point.y < -70 || point.y > height + 70) return
+    var selected = earthquake.key === selectedKey
+    var hovered = earthquake.key === hoveredKey
+    var radius = earthquakeRadius(earthquake, selected)
+    var color = Qt.color(Model.earthquakeColor(earthquake))
+
+    if (selected || hovered) {
+      context.strokeStyle = Qt.rgba(textColor.r, textColor.g, textColor.b,
+        selected ? 0.80 : 0.46)
+      context.lineWidth = selected ? 2 : 1.5
+      context.beginPath()
+      context.arc(point.x, point.y, radius + 5, 0, Math.PI * 2)
+      context.stroke()
+    }
+
+    context.fillStyle = Qt.rgba(color.r, color.g, color.b,
+      earthquakeAgeOpacity(earthquake))
+    context.strokeStyle = deepOceanColor
+    context.lineWidth = 2
+    if (context.setLineDash)
+      context.setLineDash(String(earthquake.reviewStatus || "") === "automatic" ? [3, 2] : [])
+    context.beginPath()
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+    if (context.setLineDash) context.setLineDash([])
+
+    context.fillStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, 0.88)
+    context.beginPath()
+    context.arc(point.x, point.y, Math.max(1.5, radius * 0.16), 0, Math.PI * 2)
+    context.fill()
+
+    var magnitude = Number(earthquake.magnitude || 0)
+    if (selected || hovered || (zoom >= 2.5 && magnitude >= 5.5) || zoom >= 4.5) {
+      var place = String(earthquake.name || "Earthquake").toUpperCase()
+      if (place.length > 42) place = place.slice(0, 39) + "…"
+      context.textAlign = "left"
+      context.textBaseline = "middle"
+      context.font = "700 " + (selected ? 12 : 10) + "px '" + fontFamily + "'"
+      context.fillStyle = textColor
+      context.fillText(Model.earthquakeMagnitudeLabel(earthquake) + " · " + place,
+        point.x + radius + 8, point.y - 1)
+    }
+  }
+
   function drawStormMarker(context, storm) {
     if (!storm || !Model.validCoordinate(storm.latitude, storm.longitude)) return
     var point = project(storm.latitude, storm.longitude)
@@ -666,19 +742,25 @@ Item {
     drawGrid(context)
     drawCountries(context)
     drawCountryLabels(context)
-    var draftId = draftWatchPlace ? String(draftWatchPlace.id || "") : ""
-    for (var w = 0; w < watchPlaces.length; w++) {
-      if (draftId && String(watchPlaces[w] && watchPlaces[w].id || "") === draftId) continue
-      drawWatchPlace(context, watchPlaces[w], false)
+    if (mode === "earthquakes") {
+      for (var e = 0; e < systems.length; e++) drawEarthquakeMarker(context, systems[e])
+    } else {
+      var draftId = draftWatchPlace ? String(draftWatchPlace.id || "") : ""
+      for (var w = 0; w < watchPlaces.length; w++) {
+        if (draftId && String(watchPlaces[w] && watchPlaces[w].id || "") === draftId) continue
+        drawWatchPlace(context, watchPlaces[w], false)
+      }
+      if (draftWatchPlace) drawWatchPlace(context, draftWatchPlace, true)
+      for (var o = 0; o < systems.length; o++)
+        if (systems[o].kind === "outlook") drawOutlook(context, systems[o])
+      if (selectedIsStorm) {
+        drawCone(context, selectedSystem)
+        drawPastTrack(context, selectedSystem)
+        drawForecastTrack(context, selectedSystem)
+      }
+      for (var s = 0; s < systems.length; s++)
+        if (systems[s].kind === "storm") drawStormMarker(context, systems[s])
     }
-    if (draftWatchPlace) drawWatchPlace(context, draftWatchPlace, true)
-    for (var o = 0; o < systems.length; o++) if (systems[o].kind === "outlook") drawOutlook(context, systems[o])
-    if (selectedIsStorm) {
-      drawCone(context, selectedSystem)
-      drawPastTrack(context, selectedSystem)
-      drawForecastTrack(context, selectedSystem)
-    }
-    for (var s = 0; s < systems.length; s++) if (systems[s].kind === "storm") drawStormMarker(context, systems[s])
     context.restore()
     context.strokeStyle = Qt.rgba(textColor.r, textColor.g, textColor.b, wholeGlobeVisible ? 0.24 : 0.12)
     context.lineWidth = 1
@@ -840,8 +922,15 @@ Item {
 
   onStormsChanged: canvas.requestPaint()
   onOutlooksChanged: canvas.requestPaint()
+  onEarthquakesChanged: canvas.requestPaint()
   onWatchPlacesChanged: canvas.requestPaint()
+  onModeChanged: {
+    clearHover()
+    canvas.requestPaint()
+    scheduleFitSelected(true)
+  }
   onSelectedKeyChanged: scheduleFitSelected(true)
+  onPreferOverviewChanged: if (mode === "earthquakes") scheduleFitSelected(true)
   onSelectedPlaceIdChanged: canvas.requestPaint()
   onDraftWatchPlaceChanged: canvas.requestPaint()
   onPlacementModeChanged: {

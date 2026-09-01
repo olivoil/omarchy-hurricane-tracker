@@ -53,9 +53,24 @@ Item {
     outlooks: [],
     regions: []
   })
+  property var earthquakePayload: ({
+    schemaVersion: 1,
+    status: "loading",
+    stale: false,
+    fetchedAt: "",
+    checkedAt: "",
+    source: ({
+      name: "USGS Earthquake Hazards Program",
+      url: "https://earthquake.usgs.gov/earthquakes/",
+      coverage: "Worldwide magnitude 4.5+ earthquakes from the past seven days"
+    }),
+    error: "",
+    events: []
+  })
   property var storms: []
   property var outlooks: []
   property var regions: []
+  property var earthquakes: []
   property var watchPlaces: []
   property bool watchPlacesLoaded: false
   property string watchPlacesError: ""
@@ -65,6 +80,12 @@ Item {
   property int consecutiveFailures: 0
   property string processOutput: ""
   property string processError: ""
+  property bool earthquakeLoading: false
+  property bool earthquakeHasLoaded: false
+  property bool earthquakePendingRefresh: false
+  property int earthquakeConsecutiveFailures: 0
+  property string earthquakeProcessOutput: ""
+  property string earthquakeProcessError: ""
   property var alertBaseline: ({})
   property bool alertsArmed: false
   property string appliedAlertConfig: ""
@@ -106,6 +127,16 @@ Item {
   readonly property int activeCount: Array.isArray(storms) ? storms.length : 0
   readonly property int outlookCount: Array.isArray(outlooks) ? outlooks.length : 0
   readonly property int trackingCount: activeCount + outlookCount
+  readonly property string earthquakeStatus:
+    String(earthquakePayload && earthquakePayload.status || "loading")
+  readonly property bool earthquakeStale:
+    earthquakePayload && earthquakePayload.stale === true
+  readonly property string earthquakeError:
+    String(earthquakePayload && earthquakePayload.error || "")
+  readonly property string earthquakeFetchedAt:
+    String(earthquakePayload && earthquakePayload.fetchedAt || "")
+  readonly property int earthquakeCount:
+    Array.isArray(earthquakes) ? earthquakes.length : 0
   readonly property var incompleteOutlookBasins: payload
     && Array.isArray(payload.incompleteOutlookBasins) ? payload.incompleteOutlookBasins : []
   readonly property bool outlookDataComplete: incompleteOutlookBasins.length === 0
@@ -114,6 +145,10 @@ Item {
   readonly property int watchPlaceCount: Array.isArray(watchPlaces) ? watchPlaces.length : 0
   readonly property int refreshMinutes: Math.max(5, Math.min(60, Number(setting("refreshMinutes", 15)) || 15))
   readonly property int retryMultiplier: Math.min(4, Math.pow(2, Math.min(consecutiveFailures, 2)))
+  readonly property int earthquakeRefreshMinutes: Math.max(5,
+    Math.min(60, Number(setting("earthquakeRefreshMinutes", 5)) || 5))
+  readonly property int earthquakeRetryMultiplier: Math.min(4,
+    Math.pow(2, Math.min(earthquakeConsecutiveFailures, 2)))
   readonly property bool settingsReady: settings && Object.keys(settings).length > 0
   readonly property string alertRegion: settingsReady ? String(setting("alertRegion", "Off")) : "Off"
   readonly property string formationThreshold: String(setting("formationThreshold", "Medium (40%)"))
@@ -171,6 +206,11 @@ Item {
   }
 
   function refresh() {
+    refreshTropical()
+    refreshEarthquakes()
+  }
+
+  function refreshTropical() {
     if (fetchProcess.running) {
       pendingRefresh = true
       return
@@ -180,6 +220,18 @@ Item {
     processError = ""
     fetchProcess.command = [backendPath, "fetch"]
     fetchProcess.running = true
+  }
+
+  function refreshEarthquakes() {
+    if (earthquakeFetchProcess.running) {
+      earthquakePendingRefresh = true
+      return
+    }
+    earthquakeLoading = true
+    earthquakeProcessOutput = ""
+    earthquakeProcessError = ""
+    earthquakeFetchProcess.command = [backendPath, "fetch-earthquakes"]
+    earthquakeFetchProcess.running = true
   }
 
   function applyWatchConfig(raw, assignValues) {
@@ -500,6 +552,23 @@ Item {
     return true
   }
 
+  function applyEarthquakePayload(raw) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 8 * 1024 * 1024)
+      return false
+    var parsed
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      return false
+    }
+    if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.events)
+        || parsed.events.length > 500) return false
+    earthquakePayload = parsed
+    earthquakes = parsed.events
+    earthquakeHasLoaded = true
+    return true
+  }
+
   function currentAlertSnapshot() {
     return Model.alertSnapshot(storms, outlooks, alertRegion, formationThreshold, notifyNamedStorms)
   }
@@ -705,7 +774,43 @@ Item {
       }
       if (root.pendingRefresh) {
         root.pendingRefresh = false
-        Qt.callLater(root.refresh)
+        Qt.callLater(root.refreshTropical)
+      }
+    }
+  }
+
+  Process {
+    id: earthquakeFetchProcess
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.earthquakeProcessOutput = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.earthquakeProcessError = text
+    }
+    onExited: function(exitCode) {
+      var accepted = root.applyEarthquakePayload(root.earthquakeProcessOutput)
+      root.earthquakeProcessOutput = ""
+      root.earthquakeLoading = false
+      root.earthquakeConsecutiveFailures = accepted && root.earthquakeStatus === "fresh"
+        ? 0 : Math.min(6, root.earthquakeConsecutiveFailures + 1)
+      if (!accepted && !root.earthquakeHasLoaded) {
+        root.earthquakePayload = {
+          schemaVersion: 1,
+          status: "error",
+          stale: false,
+          fetchedAt: "",
+          checkedAt: "",
+          source: root.earthquakePayload.source,
+          error: "Earthquake data could not be read. Try again shortly.",
+          events: []
+        }
+      }
+      if (root.earthquakePendingRefresh) {
+        root.earthquakePendingRefresh = false
+        Qt.callLater(root.refreshEarthquakes)
       }
     }
   }
@@ -836,7 +941,16 @@ Item {
     repeat: true
     running: true
     triggeredOnStart: true
-    onTriggered: root.refresh()
+    onTriggered: root.refreshTropical()
+  }
+
+  Timer {
+    id: earthquakeRefreshTimer
+    interval: root.earthquakeRefreshMinutes * 60 * 1000 * root.earthquakeRetryMultiplier
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: root.refreshEarthquakes()
   }
 
   onAlertConfigKeyChanged: {

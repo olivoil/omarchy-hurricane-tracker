@@ -1,0 +1,114 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": 1788008400000,
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson",
+    "title": "USGS Magnitude 4.5+ Earthquakes, Past Week",
+    "status": 200,
+    "api": "2.7.0",
+    "count": 4
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 6.1,
+        "place": "42 km W of Test Coast",
+        "time": 1788006896000,
+        "updated": 1788008400000,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000test1",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000test1.geojson",
+        "felt": 123,
+        "cdi": 5.4,
+        "mmi": 6.2,
+        "alert": "yellow",
+        "status": "reviewed",
+        "tsunami": 1,
+        "sig": 701,
+        "net": "us",
+        "magType": "mww",
+        "type": "earthquake",
+        "title": "M 6.1 - 42 km W of Test Coast"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-101.25, 18.75, 12.4]
+      },
+      "id": "us7000test1"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 4.8,
+        "place": "18 km NE of Sample City",
+        "time": 1787911200000,
+        "updated": 1787911200000,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000test2",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000test2.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 354,
+        "net": "us",
+        "magType": "mb",
+        "type": "earthquake",
+        "title": "M 4.8 - 18 km NE of Sample City"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [140.2, 35.4, 44.8]
+      },
+      "id": "us7000test2"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 4.7,
+        "place": "Test Quarry",
+        "time": 1787911200000,
+        "updated": 1787911200000,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ciquarry",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/ciquarry.geojson",
+        "status": "reviewed",
+        "tsunami": 0,
+        "sig": 340,
+        "net": "ci",
+        "magType": "ml",
+        "type": "quarry blast",
+        "title": "M 4.7 Quarry Blast"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-117.0, 34.0, 1.0]
+      },
+      "id": "ciquarry"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 5.0,
+        "place": "Invalid coordinate",
+        "time": 1787911200000,
+        "updated": 1787911200000,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/invalid",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/invalid.geojson",
+        "status": "reviewed",
+        "tsunami": 0,
+        "sig": 385,
+        "net": "us",
+        "magType": "mb",
+        "type": "earthquake",
+        "title": "M 5.0 - Invalid coordinate"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [220.0, 95.0, 10.0]
+      },
+      "id": "invalid"
+    }
+  ],
+  "bbox": [-117.0, 18.75, 1.0, 220.0, 95.0, 44.8]
+}
