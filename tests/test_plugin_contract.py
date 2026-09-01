@@ -78,10 +78,24 @@ class PluginContractTests(unittest.TestCase):
             "function drawCountries", 1
         )[0]
 
-        self.assertIn("Model.clippedHemisphereRings", country_paint)
+        self.assertIn("Model.clippedPreparedHemisphereRings", country_paint)
         self.assertIn("fragment.boundaryLength", country_paint)
         self.assertIn("if (!fragment.clipped) context.closePath()", country_paint)
         self.assertNotIn("allVisible", country_paint)
+
+    def test_country_geometry_is_prepared_once_instead_of_during_each_paint(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        country_paint = storm_map.split("function paintCountryRing", 1)[1].split(
+            "function drawCountries", 1
+        )[0]
+        country_draw = storm_map.split("function drawCountries", 1)[1].split(
+            "function drawCountryLabels", 1
+        )[0]
+
+        self.assertIn("property var preparedCountryRings", storm_map)
+        self.assertIn("function prepareCountryGeometry", storm_map)
+        self.assertIn("Model.clippedPreparedHemisphereRings", country_paint)
+        self.assertIn("preparedCountryRings", country_draw)
 
     def test_outlook_connectors_are_drawn_as_directional_links(self):
         storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
@@ -147,7 +161,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('"YOUR LOCATION · "', storm_map)
         self.assertIn("zoom = minimumZoom", storm_map)
         self.assertIn("ParallelAnimation", storm_map)
-        self.assertIn("Easing.OutQuint", storm_map)
+        self.assertIn("Easing.InOutSine", storm_map)
         self.assertIn("root.cancelOpeningFlight()", storm_map)
 
     def test_plain_open_starts_with_no_selected_system(self):
@@ -167,6 +181,16 @@ class PluginContractTests(unittest.TestCase):
             open_function.index('selectedKey = ""'),
             open_function.index("syncSelection(true)"),
         )
+
+    def test_opening_flight_starts_immediately_with_a_smooth_camera_curve(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        opening_flight = storm_map.split("id: openingFlight", 1)[1].split(
+            "FileView {", 1
+        )[0]
+
+        self.assertNotIn("PauseAnimation", opening_flight)
+        self.assertNotIn("Easing.OutQuint", opening_flight)
+        self.assertEqual(opening_flight.count("Easing.InOutSine"), 3)
 
     def test_navigation_shell_keeps_alerts_global_and_trackers_extensible(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")

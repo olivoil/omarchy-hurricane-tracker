@@ -181,6 +181,22 @@ for (let index = 1; index < horizonPoints.length; index++) {
     horizonPoints[index].y - horizonPoints[index - 1].y
   ) < 0.05)
 }
+const preparedLimbLand = model.prepareHemisphereRing(easternLimbLand)
+const preparedLimbFragments = model.clippedPreparedHemisphereRings(
+  preparedLimbLand, 0, 0
+)
+assert.equal(preparedLimbLand.length, easternLimbLand.length - 1)
+assert.equal(preparedLimbFragments.length, limbFragments.length)
+assert.equal(preparedLimbFragments[0].boundaryLength, limbFragments[0].boundaryLength)
+assert.equal(preparedLimbFragments[0].points.length, limbFragments[0].points.length)
+for (let index = 0; index < limbFragments[0].points.length; index++) {
+  assert.ok(Math.abs(
+    preparedLimbFragments[0].points[index].x - limbFragments[0].points[index].x
+  ) < 1e-9)
+  assert.ok(Math.abs(
+    preparedLimbFragments[0].points[index].y - limbFragments[0].points[index].y
+  ) < 1e-9)
+}
 
 assert.equal(model.alertRegionCode("Atlantic"), "al")
 assert.equal(model.alertThresholdValue("Medium (40%)"), 40)

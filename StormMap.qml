@@ -53,6 +53,7 @@ Item {
   property string fontFamily: "sans-serif"
 
   property var countries: []
+  property var preparedCountryRings: []
   property string hoveredKey: ""
   property string hoveredPlaceId: ""
   property var hoveredPoint: null
@@ -445,9 +446,25 @@ Item {
     }
   }
 
-  function paintCountryRing(context, ring) {
-    var fragments = Model.clippedHemisphereRings(
-      ring, centreLatitude, centreLongitude)
+  function prepareCountryGeometry(rows) {
+    var prepared = []
+    var features = Array.isArray(rows) ? rows : []
+    for (var featureIndex = 0; featureIndex < features.length; featureIndex++) {
+      var geometry = features[featureIndex] && features[featureIndex].geometry
+      var polygons = geometry && Array.isArray(geometry.coordinates)
+        ? geometry.coordinates : []
+      for (var polygonIndex = 0; polygonIndex < polygons.length; polygonIndex++) {
+        var ring = polygons[polygonIndex] && polygons[polygonIndex][0]
+        var points = Model.prepareHemisphereRing(ring)
+        if (points.length >= 3) prepared.push(points)
+      }
+    }
+    return prepared
+  }
+
+  function paintCountryRing(context, preparedRing) {
+    var fragments = Model.clippedPreparedHemisphereRings(
+      preparedRing, centreLatitude, centreLongitude)
     for (var fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
       var fragment = fragments[fragmentIndex]
       var points = fragment.points
@@ -482,14 +499,9 @@ Item {
     context.strokeStyle = Qt.rgba(landOutlineColor.r, landOutlineColor.g, landOutlineColor.b, 0.76)
     context.lineWidth = zoom < 3 ? 0.75 : 1.0
     context.lineJoin = "round"
-    var rows = Array.isArray(countries) ? countries : []
+    var rows = Array.isArray(preparedCountryRings) ? preparedCountryRings : []
     for (var i = 0; i < rows.length; i++) {
-      var geometry = rows[i] && rows[i].geometry
-      var polygons = geometry && Array.isArray(geometry.coordinates) ? geometry.coordinates : []
-      for (var p = 0; p < polygons.length; p++) {
-        var ring = polygons[p] && polygons[p][0]
-        paintCountryRing(context, ring)
-      }
+      paintCountryRing(context, rows[i])
     }
   }
 
@@ -856,32 +868,29 @@ Item {
     context.stroke()
   }
 
-  SequentialAnimation {
+  ParallelAnimation {
     id: openingFlight
 
-    PauseAnimation { duration: 140 }
-    ParallelAnimation {
-      NumberAnimation {
-        id: openingLatitude
-        target: root
-        property: "centreLatitude"
-        duration: 1080
-        easing.type: Easing.OutQuint
-      }
-      NumberAnimation {
-        id: openingLongitude
-        target: root
-        property: "centreLongitude"
-        duration: 1080
-        easing.type: Easing.OutQuint
-      }
-      NumberAnimation {
-        id: openingZoom
-        target: root
-        property: "zoom"
-        duration: 1080
-        easing.type: Easing.OutQuint
-      }
+    NumberAnimation {
+      id: openingLatitude
+      target: root
+      property: "centreLatitude"
+      duration: 1080
+      easing.type: Easing.InOutSine
+    }
+    NumberAnimation {
+      id: openingLongitude
+      target: root
+      property: "centreLongitude"
+      duration: 1080
+      easing.type: Easing.InOutSine
+    }
+    NumberAnimation {
+      id: openingZoom
+      target: root
+      property: "zoom"
+      duration: 1080
+      easing.type: Easing.InOutSine
     }
     onFinished: {
       root.centreLongitude = Model.wrapLongitude(root.openingFlightTargetLongitude)
@@ -897,8 +906,10 @@ Item {
       try {
         var collection = JSON.parse(text())
         root.countries = Array.isArray(collection.features) ? collection.features : []
+        root.preparedCountryRings = root.prepareCountryGeometry(root.countries)
       } catch (error) {
         root.countries = []
+        root.preparedCountryRings = []
       }
       canvas.requestPaint()
     }

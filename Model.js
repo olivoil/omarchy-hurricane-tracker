@@ -353,16 +353,6 @@ function orthographicPoint(latitude, longitude, centreLatitude, centreLongitude)
   }
 }
 
-function hemisphereCoordinatePoint(value, centreLatitude, centreLongitude) {
-  var latitude = Array.isArray(value) ? Number(value[1]) : Number(value && value.latitude)
-  var longitude = Array.isArray(value) ? Number(value[0]) : Number(value && value.longitude)
-  if (!validCoordinate(latitude, longitude)) return null
-  var point = orthographicPoint(latitude, longitude, centreLatitude, centreLongitude)
-  if (Math.abs(point.z) < 1e-12) point.z = 0
-  point.horizon = point.z === 0
-  return point
-}
-
 function sameHemispherePoint(first, second) {
   if (!first || !second) return false
   var dx = first.x - second.x
@@ -382,6 +372,55 @@ function pushHemispherePoint(points, point) {
     return
   }
   points.push(point)
+}
+
+function prepareHemisphereRing(coordinates) {
+  var rows = Array.isArray(coordinates) ? coordinates : []
+  var points = []
+  var radians = Math.PI / 180
+  for (var index = 0; index < rows.length; index++) {
+    var value = rows[index]
+    var latitude = Array.isArray(value) ? Number(value[1]) : Number(value && value.latitude)
+    var longitude = Array.isArray(value) ? Number(value[0]) : Number(value && value.longitude)
+    if (!validCoordinate(latitude, longitude)) continue
+    var phi = latitude * radians
+    var lambda = longitude * radians
+    var cosPhi = Math.cos(phi)
+    pushHemispherePoint(points, {
+      x: cosPhi * Math.sin(lambda),
+      y: Math.sin(phi),
+      z: cosPhi * Math.cos(lambda)
+    })
+  }
+  if (points.length > 1 && sameHemispherePoint(points[0], points[points.length - 1]))
+    points.pop()
+  return points
+}
+
+function projectPreparedHemisphereRing(prepared, centreLatitude, centreLongitude) {
+  var source = Array.isArray(prepared) ? prepared : []
+  var points = []
+  var radians = Math.PI / 180
+  var phi0 = Number(centreLatitude) * radians
+  var lambda0 = Number(centreLongitude) * radians
+  var sinPhi0 = Math.sin(phi0)
+  var cosPhi0 = Math.cos(phi0)
+  var sinLambda0 = Math.sin(lambda0)
+  var cosLambda0 = Math.cos(lambda0)
+  for (var index = 0; index < source.length; index++) {
+    var world = source[index]
+    if (!world) continue
+    var forward = world.z * cosLambda0 + world.x * sinLambda0
+    var z = sinPhi0 * world.y + cosPhi0 * forward
+    if (Math.abs(z) < 1e-12) z = 0
+    points.push({
+      x: world.x * cosLambda0 - world.z * sinLambda0,
+      y: cosPhi0 * world.y - sinPhi0 * forward,
+      z: z,
+      horizon: z === 0
+    })
+  }
+  return points
 }
 
 function horizonIntersection(first, second) {
@@ -425,18 +464,7 @@ function closeHemisphereFragment(boundary) {
   }
 }
 
-// Intersect a geographic polygon ring with the visible orthographic
-// hemisphere. Hidden runs are closed along the curved horizon instead of by
-// a straight canvas chord through the globe.
-function clippedHemisphereRings(coordinates, centreLatitude, centreLongitude) {
-  var rows = Array.isArray(coordinates) ? coordinates : []
-  var source = []
-  for (var index = 0; index < rows.length; index++) {
-    pushHemispherePoint(source, hemisphereCoordinatePoint(
-      rows[index], centreLatitude, centreLongitude))
-  }
-  if (source.length > 1 && sameHemispherePoint(source[0], source[source.length - 1]))
-    source.pop()
+function clipHemispherePoints(source) {
   if (source.length < 3) return []
 
   var outsideIndex = -1
@@ -481,6 +509,19 @@ function clippedHemisphereRings(coordinates, centreLatitude, centreLongitude) {
     }
   }
   return fragments
+}
+
+function clippedPreparedHemisphereRings(prepared, centreLatitude, centreLongitude) {
+  return clipHemispherePoints(projectPreparedHemisphereRing(
+    prepared, centreLatitude, centreLongitude))
+}
+
+// Intersect a geographic polygon ring with the visible orthographic
+// hemisphere. Hidden runs are closed along the curved horizon instead of by
+// a straight canvas chord through the globe.
+function clippedHemisphereRings(coordinates, centreLatitude, centreLongitude) {
+  return clippedPreparedHemisphereRings(
+    prepareHemisphereRing(coordinates), centreLatitude, centreLongitude)
 }
 
 function orthographicFit(coordinates, bounds) {
