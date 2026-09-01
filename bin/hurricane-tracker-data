@@ -47,6 +47,8 @@ OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 OPEN_METEO_GEOCODING_HOST = "geocoding-api.open-meteo.com"
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 NOMINATIM_REVERSE_HOST = "nominatim.openstreetmap.org"
+WTTR_LOCATION_URL = "https://wttr.in/?format=j1"
+WTTR_LOCATION_HOST = "wttr.in"
 ALLOWED_HOSTS = frozenset(
     {
         "nhc.noaa.gov",
@@ -65,6 +67,8 @@ MAX_CACHE_BYTES = 8_000_000
 MAX_WATCH_CONFIG_BYTES = 64_000
 MAX_OPEN_METEO_RESPONSE_BYTES = 64 * 1024
 MAX_NOMINATIM_RESPONSE_BYTES = 64 * 1024
+MAX_WTTR_LOCATION_RESPONSE_BYTES = 512 * 1024
+MAX_OMARCHY_LOCATION_BYTES = 16 * 1024
 MAX_STORMS = 20
 MAX_OUTLOOKS = 24
 MAX_EARTHQUAKES = 500
@@ -160,6 +164,10 @@ def watch_config_path() -> Path:
         / "hurricane-tracker"
         / "watch-places.json"
     )
+
+
+def omarchy_weather_location_path() -> Path:
+    return home_directory() / ".local/state/omarchy/settings/weather.json"
 
 
 def safe_text(value: Any, limit: int = 160) -> str:
@@ -301,6 +309,27 @@ def is_nominatim_reverse_url(url: str) -> bool:
         and math.isfinite(longitude)
         and -90 <= latitude <= 90
         and -180 <= longitude <= 180
+    )
+
+
+def is_wttr_location_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+        port = parsed.port
+        parameters = urllib.parse.parse_qs(
+            parsed.query, keep_blank_values=True, strict_parsing=True
+        )
+    except (ValueError, TypeError):
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == WTTR_LOCATION_HOST
+        and parsed.path == "/"
+        and port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment
+        and parameters == {"format": ["j1"]}
     )
 
 
@@ -724,6 +753,144 @@ def reverse_geocode_place(
         longitude_value,
         fetcher(latitude_value, longitude_value),
     )
+
+
+def unavailable_default_location() -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "available": False,
+        "provider": "none",
+    }
+
+
+def default_location_result(
+    name: Any,
+    latitude: Any,
+    longitude: Any,
+    provider: str,
+) -> dict[str, Any]:
+    safe_name = remote_display_text(name, required=True)
+    if safe_name is None:
+        raise DataError("default location did not include a safe place name")
+    safe_name = safe_name[:40].rstrip()
+    if isinstance(latitude, bool) or isinstance(longitude, bool):
+        raise DataError("default location included invalid coordinates")
+    latitude_value = number(latitude)
+    longitude_value = number(longitude)
+    if (
+        latitude_value is None
+        or longitude_value is None
+        or not -90 <= latitude_value <= 90
+        or not -180 <= longitude_value <= 180
+    ):
+        raise DataError("default location included invalid coordinates")
+    return {
+        "schemaVersion": 1,
+        "available": True,
+        "provider": provider,
+        "name": safe_name,
+        "latitude": round(latitude_value, 5),
+        "longitude": round(longitude_value, 5),
+    }
+
+
+def read_omarchy_weather_location(path: Path | None = None) -> dict[str, Any] | None:
+    target = path or omarchy_weather_location_path()
+    if not target.exists():
+        return None
+    try:
+        if not target.is_file():
+            raise DataError("Omarchy weather location is not a regular file")
+        if target.stat().st_size > MAX_OMARCHY_LOCATION_BYTES:
+            raise DataError("Omarchy weather location exceeded the size limit")
+        parsed = json.loads(target.read_text(encoding="utf-8"))
+    except DataError:
+        raise
+    except OSError as error:
+        raise DataError("Omarchy weather location could not be read") from error
+    except UnicodeDecodeError as error:
+        raise DataError("Omarchy weather location was not valid UTF-8") from error
+    except json.JSONDecodeError as error:
+        raise DataError("Omarchy weather location was not valid JSON") from error
+    if not isinstance(parsed, dict):
+        raise DataError("Omarchy weather location had an unsupported structure")
+
+    name = remote_display_text(parsed.get("name"), required=True)
+    if name is None:
+        return None
+    latitude = parsed.get("latitude")
+    longitude = parsed.get("longitude")
+    if latitude is None or longitude is None:
+        return {"name": name}
+    return default_location_result(
+        name, latitude, longitude, "omarchy-weather"
+    )
+
+
+def wttr_display_value(value: Any) -> str | None:
+    if not isinstance(value, list) or not value or not isinstance(value[0], dict):
+        return None
+    return remote_display_text(value[0].get("value"), required=True)
+
+
+def normalize_wttr_location_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise DataError("wttr.in response was not an object")
+    areas = value.get("nearest_area")
+    if not isinstance(areas, list) or not areas or not isinstance(areas[0], dict):
+        raise DataError("wttr.in response did not include a nearest area")
+    area = areas[0]
+    name = wttr_display_value(area.get("areaName"))
+    if name is None:
+        raise DataError("wttr.in response did not include a safe place name")
+    return default_location_result(
+        name,
+        area.get("latitude"),
+        area.get("longitude"),
+        "wttr-in-ip",
+    )
+
+
+def fetch_wttr_location_json(opener: Any = DIRECT_OPENER) -> Any:
+    raw = fetch_direct_bytes(
+        WTTR_LOCATION_URL,
+        MAX_WTTR_LOCATION_RESPONSE_BYTES,
+        is_wttr_location_url,
+        "wttr.in",
+        "application/json",
+        5,
+        require_json=True,
+        opener=opener,
+    )
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DataError("wttr.in response was not valid JSON") from error
+
+
+def resolve_default_location(
+    allow_network: bool,
+    location_path: Path | None = None,
+    place_searcher: Callable[[str], dict[str, Any]] = search_places,
+    ip_fetcher: Callable[[], Any] = fetch_wttr_location_json,
+) -> dict[str, Any]:
+    configured = read_omarchy_weather_location(location_path)
+    if configured and configured.get("available") is True:
+        return configured
+    if not allow_network:
+        return unavailable_default_location()
+    if configured and configured.get("name"):
+        results = place_searcher(str(configured["name"]).strip()).get("results", [])
+        if results:
+            first = results[0]
+            return default_location_result(
+                first.get("name"),
+                first.get("latitude"),
+                first.get("longitude"),
+                "omarchy-weather-search",
+            )
+        return unavailable_default_location()
+    return normalize_wttr_location_payload(ip_fetcher())
 
 
 def local_name(tag: str) -> str:
@@ -1689,6 +1856,9 @@ def normalized_watch_place(value: Any) -> dict[str, Any] | None:
 def normalize_watch_config(value: Any) -> dict[str, Any]:
     source = value.get("places", []) if isinstance(value, dict) else []
     rows = source if isinstance(source, list) else []
+    default_location_initialized = (
+        isinstance(value, dict) and value.get("defaultLocationInitialized") is True
+    )
     places = []
     identifiers: set[str] = set()
     for row in rows:
@@ -1699,16 +1869,31 @@ def normalize_watch_config(value: Any) -> dict[str, Any]:
         places.append(place)
         if len(places) >= MAX_WATCH_PLACES:
             break
-    return {"schemaVersion": 1, "places": places}
+    return {
+        "schemaVersion": 2,
+        "defaultLocationInitialized": default_location_initialized,
+        "places": places,
+    }
 
 
 def validate_persisted_watch_config(value: Any) -> dict[str, Any]:
+    version = value.get("schemaVersion") if isinstance(value, dict) else None
     if (
         not isinstance(value, dict)
-        or type(value.get("schemaVersion")) is not int
-        or value.get("schemaVersion") != 1
+        or type(version) is not int
+        or version not in {1, 2}
         or not isinstance(value.get("places"), list)
         or len(value["places"]) > MAX_WATCH_PLACES
+        or (version == 1 and set(value) != {"schemaVersion", "places"})
+        or (
+            version == 2
+            and (
+                set(value) != {
+                    "schemaVersion", "defaultLocationInitialized", "places"
+                }
+                or type(value.get("defaultLocationInitialized")) is not bool
+            )
+        )
     ):
         raise DataError("watch-place settings had an unsupported structure")
     expected_keys = {"id", "name", "latitude", "longitude", "radiusKm"}
@@ -1733,7 +1918,13 @@ def validate_persisted_watch_config(value: Any) -> dict[str, Any]:
             raise DataError("watch-place settings contained an invalid record")
         identifiers.add(place["id"])
         places.append(place)
-    return {"schemaVersion": 1, "places": places}
+    return {
+        "schemaVersion": 2,
+        "defaultLocationInitialized": (
+            value["defaultLocationInitialized"] if version == 2 else len(places) > 0
+        ),
+        "places": places,
+    }
 
 
 def read_watch_config(path: Path | None = None) -> dict[str, Any]:
@@ -1894,6 +2085,15 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     place_reverse.add_argument("latitude", type=float, help="WGS84 latitude")
     place_reverse.add_argument("longitude", type=float, help="WGS84 longitude")
+    default_location = subparsers.add_parser(
+        "default-location",
+        help="Resolve the user's one-time default alert location",
+    )
+    default_location.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="Allow coarse IP location or a configured-name lookup",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "fetch":
@@ -1946,6 +2146,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     if args.command == "place-reverse":
         try:
             emit(reverse_geocode_place(args.latitude, args.longitude))
+            return 0
+        except DataError as error:
+            print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)
+            return 2
+
+    if args.command == "default-location":
+        try:
+            emit(resolve_default_location(args.allow_network))
             return 0
         except DataError as error:
             print(f"hurricane-tracker-data: {safe_text(error, 240)}", file=sys.stderr)

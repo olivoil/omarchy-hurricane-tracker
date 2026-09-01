@@ -125,6 +125,7 @@ assert.ok(model.outlookWatchProximity(visualOnlyConnector, {
 const systems = model.orderedSystems([storm], [outlook])
 assert.deepEqual(Array.from(systems, item => item.key), ["storm:al012026", "outlook:al-outlook-1"])
 assert.equal(model.selectedKeyAfterRefresh(systems, "outlook:al-outlook-1"), "outlook:al-outlook-1")
+assert.equal(model.selectedKeyAfterRefresh(systems, ""), "")
 assert.equal(model.selectedKeyAfterRefresh(systems, "missing"), "storm:al012026")
 
 const regionRows = model.regionalRows([storm], [outlook])
@@ -152,6 +153,34 @@ assert.ok(sphericalFit.horizontalExtent > 0.08)
 assert.ok(sphericalFit.verticalExtent > 0.05)
 assert.ok(sphericalFit.minimumDepth > 0.9)
 assert.ok(model.regionCoordinates([storm], [outlook], "al").length > model.systemCoordinates(storm).length)
+
+const easternLimbLand = [
+  [80, -20],
+  [100, -20],
+  [100, 20],
+  [80, 20],
+  [80, -20]
+]
+const limbFragments = model.clippedHemisphereRings(easternLimbLand, 0, 0)
+assert.equal(limbFragments.length, 1)
+assert.equal(limbFragments[0].clipped, true)
+assert.ok(limbFragments[0].boundaryLength >= 4)
+assert.ok(limbFragments[0].points.length > limbFragments[0].boundaryLength)
+assert.ok(limbFragments[0].points.every(point => point.z >= -1e-9))
+const horizonPoints = [
+  limbFragments[0].points[limbFragments[0].boundaryLength - 1],
+  ...limbFragments[0].points.slice(limbFragments[0].boundaryLength),
+  limbFragments[0].points[0]
+]
+assert.ok(horizonPoints.length > 3)
+assert.ok(horizonPoints.every(point => Math.abs(Math.hypot(point.x, point.y) - 1) < 1e-9))
+assert.ok(horizonPoints.every(point => point.x > 0.9))
+for (let index = 1; index < horizonPoints.length; index++) {
+  assert.ok(Math.hypot(
+    horizonPoints[index].x - horizonPoints[index - 1].x,
+    horizonPoints[index].y - horizonPoints[index - 1].y
+  ) < 0.05)
+}
 
 assert.equal(model.alertRegionCode("Atlantic"), "al")
 assert.equal(model.alertThresholdValue("Medium (40%)"), 40)

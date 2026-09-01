@@ -29,6 +29,9 @@ Item {
   property real maximumZoom: 32
   property real bottomInset: 0
   property bool userMoved: false
+  property real openingFlightTargetLongitude: 0
+  property var openingArrivalPlace: null
+  readonly property bool openingFlightRunning: openingFlight.running
   readonly property real viewHeight: Math.max(1, height - bottomInset)
   readonly property real mapCenterX: width / 2
   readonly property real mapCenterY: viewHeight / 2
@@ -103,6 +106,7 @@ Item {
   }
 
   function applyBounds(bounds, coordinates, minimum) {
+    cancelOpeningFlight()
     var fit = Model.orthographicFit(coordinates, bounds)
     centreLatitude = fit.centreLatitude
     centreLongitude = fit.centreLongitude
@@ -144,6 +148,7 @@ Item {
 
   function focusWatchPlace(place) {
     if (width < 40 || height < 40) return
+    cancelOpeningFlight()
     var focus = Model.watchPlaceFocus(place, zoom, minimumZoom, maximumZoom)
     if (!focus) return
     centreLatitude = focus.centreLatitude
@@ -154,16 +159,69 @@ Item {
     canvas.requestPaint()
   }
 
+  function cancelOpeningFlight() {
+    var changed = false
+    if (openingFlight.running) {
+      openingFlight.stop()
+      centreLongitude = Model.wrapLongitude(centreLongitude)
+      changed = true
+    }
+    if (openingArrivalPlace) {
+      openingArrivalPlace = null
+      changed = true
+    }
+    if (changed) canvas.requestPaint()
+  }
+
+  function beginOpeningFlight(place, animate) {
+    var normalized = Model.normalizeWatchPlace(place)
+    if (width < 40 || height < 40 || !normalized) return false
+    cancelOpeningFlight()
+    openingArrivalPlace = normalized
+    var focus = Model.watchPlaceFocus(
+      normalized, minimumZoom, minimumZoom, maximumZoom)
+    if (!focus) return false
+    if (animate !== true) {
+      centreLatitude = focus.centreLatitude
+      centreLongitude = focus.centreLongitude
+      zoom = focus.zoom
+      userMoved = true
+      clearHover()
+      canvas.requestPaint()
+      return true
+    }
+
+    var startLatitude = Model.clamp(focus.centreLatitude * 0.16, -10, 10)
+    var startLongitude = focus.centreLongitude - 104
+    centreLatitude = startLatitude
+    centreLongitude = startLongitude
+    zoom = minimumZoom
+    userMoved = true
+    clearHover()
+    openingFlightTargetLongitude = focus.centreLongitude
+    openingLatitude.from = startLatitude
+    openingLatitude.to = focus.centreLatitude
+    openingLongitude.from = startLongitude
+    openingLongitude.to = focus.centreLongitude
+    openingZoom.from = minimumZoom
+    openingZoom.to = focus.zoom
+    canvas.requestPaint()
+    openingFlight.start()
+    return true
+  }
+
   function scheduleFitSelected(force) {
     var forceFit = force === true
-    if (!autoFitSelection || (!forceFit && userMoved)) return
+    if (!autoFitSelection || openingFlight.running || (!forceFit && userMoved)) return
     Qt.callLater(function() {
-      if (!root.autoFitSelection || (!forceFit && root.userMoved)) return
+      if (!root.autoFitSelection || openingFlight.running
+          || (!forceFit && root.userMoved)) return
       root.syncSelectionView()
     })
   }
 
   function showGlobe(basin) {
+    cancelOpeningFlight()
     if (basin) {
       var bounds = Model.regionBounds(storms, outlooks, basin)
       centreLatitude = bounds.centreLatitude
@@ -182,6 +240,7 @@ Item {
   }
 
   function zoomAt(amount, x, y) {
+    cancelOpeningFlight()
     var anchorX = x === undefined ? mapCenterX : Number(x)
     var anchorY = y === undefined ? mapCenterY : Number(y)
     var coordinate = unproject(anchorX, anchorY)
@@ -309,16 +368,35 @@ Item {
   function beginGeoPath(context, coordinates, closePath) {
     var rows = Array.isArray(coordinates) ? coordinates : []
     if (rows.length === 0) return false
+    if (closePath) {
+      var fragments = Model.clippedHemisphereRings(
+        rows, centreLatitude, centreLongitude)
+      var anyFragment = false
+      context.beginPath()
+      for (var fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
+        var fragmentPoints = fragments[fragmentIndex].points
+        if (!Array.isArray(fragmentPoints) || fragmentPoints.length < 3) continue
+        for (var fragmentPointIndex = 0;
+            fragmentPointIndex < fragmentPoints.length; fragmentPointIndex++) {
+          var spherePoint = fragmentPoints[fragmentPointIndex]
+          var fragmentX = mapCenterX + spherePoint.x * globeRadius
+          var fragmentY = mapCenterY - spherePoint.y * globeRadius
+          if (fragmentPointIndex === 0) context.moveTo(fragmentX, fragmentY)
+          else context.lineTo(fragmentX, fragmentY)
+        }
+        context.closePath()
+        anyFragment = true
+      }
+      return anyFragment
+    }
     var previousLongitude = Model.longitudeNear(centreLongitude, coordinateLongitude(rows[0]))
     var started = false
-    var allVisible = true
     context.beginPath()
     for (var i = 0; i < rows.length; i++) {
       if (i > 0) previousLongitude = Model.longitudeNear(previousLongitude, coordinateLongitude(rows[i]))
       var point = projectUnwrapped(coordinateLatitude(rows[i]), previousLongitude)
       if (!point.visible) {
         started = false
-        allVisible = false
         continue
       }
       if (!started) {
@@ -328,7 +406,6 @@ Item {
         context.lineTo(point.x, point.y)
       }
     }
-    if (closePath && allVisible && started) context.closePath()
     return started
   }
 
@@ -368,51 +445,34 @@ Item {
     }
   }
 
-  function preparedRing(ring) {
-    if (!Array.isArray(ring) || ring.length < 3) return null
-    var longitudes = []
-    var latitudes = []
-    var previous = Model.longitudeNear(centreLongitude, coordinateLongitude(ring[0]))
-    longitudes.push(previous)
-    latitudes.push(coordinateLatitude(ring[0]))
-    var sum = previous
-    for (var i = 1; i < ring.length; i++) {
-      previous = Model.longitudeNear(previous, coordinateLongitude(ring[i]))
-      longitudes.push(previous)
-      latitudes.push(coordinateLatitude(ring[i]))
-      sum += previous
-    }
-    var mean = sum / longitudes.length
-    return { longitudes: longitudes, latitudes: latitudes, shift: Math.round((centreLongitude - mean) / 360) * 360 }
-  }
-
   function paintCountryRing(context, ring) {
-    var prepared = preparedRing(ring)
-    if (!prepared) return
-    for (var copy = 0; copy <= 0; copy++) {
-      var shift = prepared.shift + copy * 360
-      var started = false
-      var any = false
-      var allVisible = true
+    var fragments = Model.clippedHemisphereRings(
+      ring, centreLatitude, centreLongitude)
+    for (var fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
+      var fragment = fragments[fragmentIndex]
+      var points = fragment.points
+      if (!Array.isArray(points) || points.length < 3) continue
       context.beginPath()
-      for (var i = 0; i < prepared.longitudes.length; i++) {
-        var point = projectUnwrapped(prepared.latitudes[i], prepared.longitudes[i] + shift)
-        if (!point.visible) {
-          started = false
-          allVisible = false
-          continue
-        }
-        any = true
-        if (!started) {
-          context.moveTo(point.x, point.y)
-          started = true
-        } else {
-          context.lineTo(point.x, point.y)
-        }
+      for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
+        var point = points[pointIndex]
+        var x = mapCenterX + point.x * globeRadius
+        var y = mapCenterY - point.y * globeRadius
+        if (pointIndex === 0) context.moveTo(x, y)
+        else context.lineTo(x, y)
       }
-      if (!any) continue
-      if (allVisible) context.closePath()
+      context.closePath()
       context.fill()
+
+      context.beginPath()
+      for (var boundaryIndex = 0;
+          boundaryIndex < fragment.boundaryLength; boundaryIndex++) {
+        var boundaryPoint = points[boundaryIndex]
+        var boundaryX = mapCenterX + boundaryPoint.x * globeRadius
+        var boundaryY = mapCenterY - boundaryPoint.y * globeRadius
+        if (boundaryIndex === 0) context.moveTo(boundaryX, boundaryY)
+        else context.lineTo(boundaryX, boundaryY)
+      }
+      if (!fragment.clipped) context.closePath()
       context.stroke()
     }
   }
@@ -491,6 +551,32 @@ Item {
       context.fillStyle = selected ? textColor : mutedTextColor
       context.fillText(String(place.name || "WATCH PLACE").toUpperCase(), point.x + radius + 7, point.y)
     }
+  }
+
+  function drawOpeningArrival(context) {
+    var place = Model.normalizeWatchPlace(openingArrivalPlace)
+    if (!place) return
+    var point = project(place.latitude, place.longitude)
+    if (!point.visible || point.x < -90 || point.x > width + 90
+        || point.y < -40 || point.y > height + 40) return
+    var radius = 6
+    context.fillStyle = surfaceColor
+    context.strokeStyle = coneColor
+    context.lineWidth = 1.8
+    context.beginPath()
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+    context.fillStyle = coneColor
+    context.beginPath()
+    context.arc(point.x, point.y, 2, 0, Math.PI * 2)
+    context.fill()
+    context.textAlign = "left"
+    context.textBaseline = "middle"
+    context.font = "700 10px '" + fontFamily + "'"
+    context.fillStyle = textColor
+    context.fillText("YOUR LOCATION · " + String(place.name || "LOCATION").toUpperCase(),
+      point.x + radius + 7, point.y)
   }
 
   function drawCone(context, storm) {
@@ -744,6 +830,7 @@ Item {
     drawCountryLabels(context)
     if (mode === "earthquakes") {
       for (var e = 0; e < systems.length; e++) drawEarthquakeMarker(context, systems[e])
+      drawOpeningArrival(context)
     } else {
       var draftId = draftWatchPlace ? String(draftWatchPlace.id || "") : ""
       for (var w = 0; w < watchPlaces.length; w++) {
@@ -767,6 +854,39 @@ Item {
     context.beginPath()
     context.arc(mapCenterX, mapCenterY, globeRadius + 3, 0, Math.PI * 2)
     context.stroke()
+  }
+
+  SequentialAnimation {
+    id: openingFlight
+
+    PauseAnimation { duration: 140 }
+    ParallelAnimation {
+      NumberAnimation {
+        id: openingLatitude
+        target: root
+        property: "centreLatitude"
+        duration: 1080
+        easing.type: Easing.OutQuint
+      }
+      NumberAnimation {
+        id: openingLongitude
+        target: root
+        property: "centreLongitude"
+        duration: 1080
+        easing.type: Easing.OutQuint
+      }
+      NumberAnimation {
+        id: openingZoom
+        target: root
+        property: "zoom"
+        duration: 1080
+        easing.type: Easing.OutQuint
+      }
+    }
+    onFinished: {
+      root.centreLongitude = Model.wrapLongitude(root.openingFlightTargetLongitude)
+      canvas.requestPaint()
+    }
   }
 
   FileView {
@@ -806,6 +926,7 @@ Item {
     property real travel: 0
 
     onPressed: function(mouse) {
+      root.cancelOpeningFlight()
       previousX = mouse.x
       previousY = mouse.y
       travel = 0
@@ -850,6 +971,7 @@ Item {
       canvas.requestPaint()
     }
     onWheel: function(wheel) {
+      root.cancelOpeningFlight()
       root.zoomAt(wheel.angleDelta.y > 0 ? 1.22 : 1 / 1.22, wheel.x, wheel.y)
       root.pointerActivity()
       wheel.accepted = true
@@ -925,6 +1047,7 @@ Item {
   onEarthquakesChanged: canvas.requestPaint()
   onWatchPlacesChanged: canvas.requestPaint()
   onModeChanged: {
+    cancelOpeningFlight()
     clearHover()
     canvas.requestPaint()
     scheduleFitSelected(true)

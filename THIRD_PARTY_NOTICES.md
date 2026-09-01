@@ -40,3 +40,10 @@ Nominatim reverse-geocoding service. Place data is © OpenStreetMap contributors
 and available under the Open Data Commons Open Database License (ODbL).
 See <https://www.openstreetmap.org/copyright> and
 <https://operations.osmfoundation.org/policies/nominatim/>.
+
+## wttr.in automatic location
+
+When Omarchy has no configured weather location and online place lookup is
+enabled, the tracker can make one fixed JSON request to wttr.in to obtain a
+coarse IP-based city and coordinate for the removable default alert. See
+<https://wttr.in/>.

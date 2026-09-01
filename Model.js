@@ -284,6 +284,7 @@ function systemByKey(systems, key) {
 }
 
 function selectedKeyAfterRefresh(systems, selectedKey) {
+  if (String(selectedKey || "") === "") return ""
   var selected = systemByKey(systems, selectedKey)
   return selected ? selected.key : (systems.length > 0 ? systems[0].key : "")
 }
@@ -350,6 +351,136 @@ function orthographicPoint(latitude, longitude, centreLatitude, centreLongitude)
     y: Math.cos(phi0) * Math.sin(phi) - Math.sin(phi0) * cosPhi * Math.cos(delta),
     z: Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * cosPhi * Math.cos(delta)
   }
+}
+
+function hemisphereCoordinatePoint(value, centreLatitude, centreLongitude) {
+  var latitude = Array.isArray(value) ? Number(value[1]) : Number(value && value.latitude)
+  var longitude = Array.isArray(value) ? Number(value[0]) : Number(value && value.longitude)
+  if (!validCoordinate(latitude, longitude)) return null
+  var point = orthographicPoint(latitude, longitude, centreLatitude, centreLongitude)
+  if (Math.abs(point.z) < 1e-12) point.z = 0
+  point.horizon = point.z === 0
+  return point
+}
+
+function sameHemispherePoint(first, second) {
+  if (!first || !second) return false
+  var dx = first.x - second.x
+  var dy = first.y - second.y
+  var dz = first.z - second.z
+  return dx * dx + dy * dy + dz * dz < 1e-18
+}
+
+function pushHemispherePoint(points, point) {
+  if (!point) return
+  var previous = points.length > 0 ? points[points.length - 1] : null
+  if (sameHemispherePoint(previous, point)) {
+    if (point.horizon) {
+      previous.z = 0
+      previous.horizon = true
+    }
+    return
+  }
+  points.push(point)
+}
+
+function horizonIntersection(first, second) {
+  if (Math.abs(first.z) < 1e-12)
+    return { x: first.x, y: first.y, z: 0, horizon: true }
+  if (Math.abs(second.z) < 1e-12)
+    return { x: second.x, y: second.y, z: 0, horizon: true }
+  var denominator = first.z - second.z
+  var amount = Math.abs(denominator) < 1e-12 ? 0.5 : first.z / denominator
+  amount = clamp(amount, 0, 1)
+  var x = first.x + (second.x - first.x) * amount
+  var y = first.y + (second.y - first.y) * amount
+  var radius = Math.hypot(x, y)
+  if (radius < 1e-12) return null
+  return { x: x / radius, y: y / radius, z: 0, horizon: true }
+}
+
+function closeHemisphereFragment(boundary) {
+  if (!Array.isArray(boundary) || boundary.length < 3) return null
+  var points = boundary.slice()
+  var entry = boundary[0]
+  var exit = boundary[boundary.length - 1]
+  var startAngle = Math.atan2(exit.y, exit.x)
+  var delta = Math.atan2(entry.y, entry.x) - startAngle
+  while (delta > Math.PI) delta -= Math.PI * 2
+  while (delta < -Math.PI) delta += Math.PI * 2
+  var steps = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 90)))
+  for (var step = 1; step < steps; step++) {
+    var angle = startAngle + delta * step / steps
+    points.push({
+      x: Math.cos(angle),
+      y: Math.sin(angle),
+      z: 0,
+      horizon: true
+    })
+  }
+  return {
+    points: points,
+    boundaryLength: boundary.length,
+    clipped: true
+  }
+}
+
+// Intersect a geographic polygon ring with the visible orthographic
+// hemisphere. Hidden runs are closed along the curved horizon instead of by
+// a straight canvas chord through the globe.
+function clippedHemisphereRings(coordinates, centreLatitude, centreLongitude) {
+  var rows = Array.isArray(coordinates) ? coordinates : []
+  var source = []
+  for (var index = 0; index < rows.length; index++) {
+    pushHemispherePoint(source, hemisphereCoordinatePoint(
+      rows[index], centreLatitude, centreLongitude))
+  }
+  if (source.length > 1 && sameHemispherePoint(source[0], source[source.length - 1]))
+    source.pop()
+  if (source.length < 3) return []
+
+  var outsideIndex = -1
+  for (var pointIndex = 0; pointIndex < source.length; pointIndex++) {
+    if (source[pointIndex].z < 0) {
+      outsideIndex = pointIndex
+      break
+    }
+  }
+  if (outsideIndex < 0) return [{
+    points: source,
+    boundaryLength: source.length,
+    clipped: false
+  }]
+
+  var fragments = []
+  var current = null
+  for (var offset = 0; offset < source.length; offset++) {
+    var first = source[(outsideIndex + offset) % source.length]
+    var second = source[(outsideIndex + offset + 1) % source.length]
+    var firstVisible = first.z >= 0
+    var secondVisible = second.z >= 0
+    if (!firstVisible && secondVisible) {
+      current = []
+      pushHemispherePoint(current, horizonIntersection(first, second))
+      pushHemispherePoint(current, second)
+    } else if (firstVisible && secondVisible) {
+      if (!current) {
+        current = []
+        pushHemispherePoint(current, first)
+      }
+      pushHemispherePoint(current, second)
+    } else if (firstVisible && !secondVisible) {
+      if (!current) {
+        current = []
+        pushHemispherePoint(current, first)
+      }
+      pushHemispherePoint(current, horizonIntersection(first, second))
+      var fragment = closeHemisphereFragment(current)
+      if (fragment) fragments.push(fragment)
+      current = null
+    }
+  }
+  return fragments
 }
 
 function orthographicFit(coordinates, bounds) {

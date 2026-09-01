@@ -20,6 +20,8 @@ Earthquake coverage is worldwide for events in the selected USGS weekly feed.
 - Excerpts from the latest NHC discussions, with links to the full advisories
 - Optional notifications for new cyclones and rising formation chances
 - A global Alerts destination for locally saved locations and proximity notifications
+- A removable default alert based on the user's Omarchy weather location
+- A whole-globe opening flight that rotates and settles on that default location
 - Typed city, region, and postal-code search while positioning an alert destination
 - Keyboard navigation, map controls, and support for reduced motion
 - Cached data when the NHC is temporarily unavailable
@@ -49,7 +51,8 @@ It needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` for tropical
 advisories and to `earthquake.usgs.gov` for the official M4.5+ weekly GeoJSON
 feed. Typed place search uses
 `geocoding-api.open-meteo.com`; map placement still works when online place
-search is disabled.
+search is disabled. When Omarchy has no saved weather coordinates, the one-time
+default alert can use `wttr.in` to resolve a coarse IP-based city.
 
 ## Settings and notifications
 
@@ -70,6 +73,13 @@ Broad basin notifications are off until you choose a basin. You can be notified 
 Alerts can cover the Atlantic, Eastern Pacific, Central Pacific, or all three.
 When you turn them on, existing systems are treated as the starting point, so
 you will not get a burst of notifications for storms already underway.
+
+On first use, the tracker adds the Omarchy weather location as a default alert.
+Saved weather coordinates are reused locally. If only a weather name is saved,
+or Omarchy is using automatic weather location, **Online place lookup** allows
+one lookup to resolve the initial coordinate. The default behaves like any
+other alert: it can be edited or removed, and removal is remembered so it is
+not recreated later.
 
 Open **Alerts** in the app header to save up to 12 locations such as home,
 family, or a destination. Search for a city, region, or postal code, or click
@@ -95,11 +105,14 @@ coverage is limited to NHC basins; a place elsewhere remains saved but is
 marked as outside the current source coverage.
 
 Online place lookup waits until typing pauses, then sends only the geographic
-search text to Open-Meteo. Choosing a point on the globe sends that coordinate
-to OpenStreetMap's Nominatim service once to suggest a nearby place name.
-Personal labels, saved watch-place lists, and alert radii are never included.
-Turn off **Online place lookup** in the plugin settings to keep globe placement
-entirely local; coordinate labels remain available as a fallback.
+search text to Open-Meteo. For the one-time default, a configured weather name
+uses the same search; with no configured location, wttr.in receives a fixed
+request and returns a coarse IP-based city and coordinate. Choosing a point on
+the globe sends that coordinate to OpenStreetMap's Nominatim service once to
+suggest a nearby place name. Personal labels, saved watch-place lists, and
+alert radii are never included. Turn off **Online place lookup** before the
+default is initialized to prevent the IP-based request; exact coordinates
+already stored by Omarchy can still be reused locally.
 
 ## Controls
 
@@ -142,9 +155,10 @@ times, depths, and magnitudes are shown. PAGER colors are impact estimates, not
 local warnings; a tsunami-information flag points users back to official guidance.
 
 Cyclone requests are limited to NHC-owned HTTPS hosts, and earthquake requests
-to `earthquake.usgs.gov`. Place lookups use only
-Open-Meteo's fixed HTTPS search endpoint and OpenStreetMap Nominatim's fixed
-HTTPS reverse endpoint. All interfaces refuse redirects and non-success
+to `earthquake.usgs.gov`. Place lookups use only Open-Meteo's fixed HTTPS
+search endpoint, OpenStreetMap Nominatim's fixed HTTPS reverse endpoint, and
+wttr.in's fixed JSON endpoint for the one-time coarse location. All interfaces
+refuse redirects and non-success
 responses and enforce streaming response limits before parsing. Place-name
 responses are capped at 64 KiB, Open-Meteo results are capped at eight, and
 remote display fields and coordinates are validated again before QML renders
@@ -157,6 +171,7 @@ Location results are provided by
 Map-click place names are provided by
 [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) through
 [Nominatim](https://nominatim.org/release-docs/latest/api/Reverse/).
+Coarse automatic city detection is provided by [wttr.in](https://wttr.in/).
 
 The latest public data is cached independently at
 `~/.cache/hurricane-tracker/storms.json` and
