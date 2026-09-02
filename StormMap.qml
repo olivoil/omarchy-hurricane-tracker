@@ -17,6 +17,8 @@ Item {
   property var draftWatchPlace: null
   property bool useImperial: false
   property bool preferOverview: false
+  property bool motionEnabled: false
+  property bool layerSwitchInProgress: false
   readonly property var systems: mode === "earthquakes"
     ? Model.orderedEarthquakes(earthquakes) : Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
@@ -29,11 +31,21 @@ Item {
   property real maximumZoom: 32
   property real bottomInset: 0
   property bool userMoved: false
+  property real cameraOffsetY: 0
+  property real layerSwitchLatitude: 0
+  property real layerSwitchLongitude: 0
+  property real layerSwitchMapCenterY: 0
+  property real layerSwitchGlobeRadius: 0
+  property real openingFlightTargetLongitude: 0
+  property var openingArrivalPlace: null
+  readonly property bool openingFlightRunning: openingFlight.running
   readonly property real viewHeight: Math.max(1, height - bottomInset)
   readonly property real mapCenterX: width / 2
-  readonly property real mapCenterY: viewHeight / 2
+  readonly property real mapCenterY: layerSwitchInProgress
+    ? layerSwitchMapCenterY : viewHeight / 2 + cameraOffsetY
   readonly property real baseGlobeRadius: Math.max(80, Math.min(width, viewHeight) * 0.43)
-  readonly property real globeRadius: baseGlobeRadius * zoom
+  readonly property real globeRadius: layerSwitchInProgress
+    ? layerSwitchGlobeRadius : baseGlobeRadius * zoom
   readonly property bool wholeGlobeVisible: globeRadius <= Math.min(width, viewHeight) / 2 - 8
 
   property color oceanColor: "#102f38"
@@ -50,6 +62,7 @@ Item {
   property string fontFamily: "sans-serif"
 
   property var countries: []
+  property var preparedCountryRings: []
   property string hoveredKey: ""
   property string hoveredPlaceId: ""
   property var hoveredPoint: null
@@ -103,6 +116,8 @@ Item {
   }
 
   function applyBounds(bounds, coordinates, minimum) {
+    cancelOpeningFlight()
+    cameraOffsetY = 0
     var fit = Model.orthographicFit(coordinates, bounds)
     centreLatitude = fit.centreLatitude
     centreLongitude = fit.centreLongitude
@@ -144,8 +159,10 @@ Item {
 
   function focusWatchPlace(place) {
     if (width < 40 || height < 40) return
+    cancelOpeningFlight()
     var focus = Model.watchPlaceFocus(place, zoom, minimumZoom, maximumZoom)
     if (!focus) return
+    cameraOffsetY = 0
     centreLatitude = focus.centreLatitude
     centreLongitude = focus.centreLongitude
     zoom = focus.zoom
@@ -154,16 +171,126 @@ Item {
     canvas.requestPaint()
   }
 
+  function beginLayerSwitch() {
+    cancelOpeningFlight()
+    layerSwitchLatitude = centreLatitude
+    layerSwitchLongitude = centreLongitude
+    layerSwitchMapCenterY = mapCenterY
+    layerSwitchGlobeRadius = globeRadius
+    layerSwitchInProgress = true
+    clearHover()
+    canvas.requestPaint()
+  }
+
+  function finishLayerSwitch() {
+    centreLatitude = layerSwitchLatitude
+    centreLongitude = layerSwitchLongitude
+    cameraOffsetY = layerSwitchMapCenterY - viewHeight / 2
+    if (baseGlobeRadius > 0)
+      zoom = layerSwitchGlobeRadius / baseGlobeRadius
+    layerSwitchInProgress = false
+    canvas.requestPaint()
+  }
+
+  function stopMomentum() {
+    momentumAnimation.running = false
+    pointer.velocityX = 0
+    pointer.velocityY = 0
+  }
+
+  function finishMomentum() {
+    stopMomentum()
+    if (pointer.containsMouse && !pointer.pressed && !placementMode)
+      updateHover(pointer.mouseX, pointer.mouseY)
+  }
+
+  function startMomentum() {
+    if (!motionEnabled || pointer.travel < 7) {
+      stopMomentum()
+      return false
+    }
+    var sampleAge = Math.max(0, Date.now() - pointer.previousSampleTime)
+    var retention = Math.exp(-sampleAge / 80)
+    pointer.velocityX *= retention
+    pointer.velocityY *= retention
+    if (Math.hypot(pointer.velocityX, pointer.velocityY) < 18) {
+      stopMomentum()
+      return false
+    }
+    clearHover()
+    momentumAnimation.running = true
+    return true
+  }
+
+  function cancelOpeningFlight() {
+    stopMomentum()
+    var changed = false
+    if (openingFlight.running) {
+      openingFlight.stop()
+      centreLongitude = Model.wrapLongitude(centreLongitude)
+      changed = true
+    }
+    if (openingArrivalPlace) {
+      openingArrivalPlace = null
+      changed = true
+    }
+    if (changed) canvas.requestPaint()
+  }
+
+  function beginOpeningFlight(place, animate) {
+    var normalized = Model.normalizeWatchPlace(place)
+    if (width < 40 || height < 40 || !normalized) return false
+    cancelOpeningFlight()
+    cameraOffsetY = 0
+    var focus = Model.watchPlaceFocus(
+      normalized, minimumZoom, minimumZoom, maximumZoom)
+    if (!focus) return false
+    openingArrivalPlace = normalized
+    if (animate !== true) {
+      centreLatitude = focus.centreLatitude
+      centreLongitude = focus.centreLongitude
+      zoom = focus.zoom
+      userMoved = true
+      clearHover()
+      openingArrivalPlace = null
+      canvas.requestPaint()
+      return true
+    }
+
+    var startLatitude = Model.clamp(focus.centreLatitude * 0.16, -10, 10)
+    var startLongitude = focus.centreLongitude - 104
+    centreLatitude = startLatitude
+    centreLongitude = startLongitude
+    zoom = minimumZoom
+    userMoved = true
+    clearHover()
+    openingFlightTargetLongitude = focus.centreLongitude
+    openingLatitude.from = startLatitude
+    openingLatitude.to = focus.centreLatitude
+    openingLongitude.from = startLongitude
+    openingLongitude.to = focus.centreLongitude
+    openingZoom.from = minimumZoom
+    openingZoom.to = focus.zoom
+    canvas.requestPaint()
+    openingFlight.start()
+    return true
+  }
+
   function scheduleFitSelected(force) {
+    if (layerSwitchInProgress) return
     var forceFit = force === true
-    if (!autoFitSelection || (!forceFit && userMoved)) return
+    if (!autoFitSelection || openingFlight.running || (!forceFit && userMoved)) return
     Qt.callLater(function() {
-      if (!root.autoFitSelection || (!forceFit && root.userMoved)) return
+      if (root.layerSwitchInProgress) return
+      if (!root.autoFitSelection || openingFlight.running
+          || (!forceFit && root.userMoved)) return
       root.syncSelectionView()
     })
   }
 
   function showGlobe(basin) {
+    cancelOpeningFlight()
+    cameraOffsetY = 0
     if (basin) {
       var bounds = Model.regionBounds(storms, outlooks, basin)
       centreLatitude = bounds.centreLatitude
@@ -182,6 +309,7 @@ Item {
   }
 
   function zoomAt(amount, x, y) {
+    cancelOpeningFlight()
     var anchorX = x === undefined ? mapCenterX : Number(x)
     var anchorY = y === undefined ? mapCenterY : Number(y)
     var coordinate = unproject(anchorX, anchorY)
@@ -306,19 +434,17 @@ Item {
     canvas.requestPaint()
   }
 
-  function beginGeoPath(context, coordinates, closePath) {
+  function beginGeoPath(context, coordinates) {
     var rows = Array.isArray(coordinates) ? coordinates : []
     if (rows.length === 0) return false
     var previousLongitude = Model.longitudeNear(centreLongitude, coordinateLongitude(rows[0]))
     var started = false
-    var allVisible = true
     context.beginPath()
     for (var i = 0; i < rows.length; i++) {
       if (i > 0) previousLongitude = Model.longitudeNear(previousLongitude, coordinateLongitude(rows[i]))
       var point = projectUnwrapped(coordinateLatitude(rows[i]), previousLongitude)
       if (!point.visible) {
         started = false
-        allVisible = false
         continue
       }
       if (!started) {
@@ -328,8 +454,49 @@ Item {
         context.lineTo(point.x, point.y)
       }
     }
-    if (closePath && allVisible && started) context.closePath()
     return started
+  }
+
+  function paintGeoFragments(context, fragments) {
+    var anyFragment = false
+    var rows = Array.isArray(fragments) ? fragments : []
+    for (var fragmentIndex = 0; fragmentIndex < rows.length; fragmentIndex++) {
+      var fragment = rows[fragmentIndex]
+      var points = fragment && fragment.points
+      if (!Array.isArray(points) || points.length < 3) continue
+
+      context.beginPath()
+      for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
+        var point = points[pointIndex]
+        var x = mapCenterX + point.x * globeRadius
+        var y = mapCenterY - point.y * globeRadius
+        if (pointIndex === 0) context.moveTo(x, y)
+        else context.lineTo(x, y)
+      }
+      context.closePath()
+      context.fill()
+
+      context.beginPath()
+      for (var boundaryIndex = 0;
+          boundaryIndex < fragment.boundaryLength; boundaryIndex++) {
+        var boundaryPoint = points[boundaryIndex]
+        var boundaryX = mapCenterX + boundaryPoint.x * globeRadius
+        var boundaryY = mapCenterY - boundaryPoint.y * globeRadius
+        if (boundaryIndex === 0) context.moveTo(boundaryX, boundaryY)
+        else context.lineTo(boundaryX, boundaryY)
+      }
+      if (!fragment.clipped) context.closePath()
+      context.stroke()
+      anyFragment = true
+    }
+    return anyFragment
+  }
+
+  function paintGeoRing(context, coordinates) {
+    var rows = Array.isArray(coordinates) ? coordinates : []
+    if (rows.length < 3) return false
+    return paintGeoFragments(context, Model.clippedHemisphereRings(
+      rows, centreLatitude, centreLongitude))
   }
 
   function drawBackground(context) {
@@ -359,62 +526,34 @@ Item {
     for (var longitude = -180; longitude < 180; longitude += spacing) {
       var meridian = []
       for (var latitude = -90; latitude <= 90; latitude += 3) meridian.push([longitude, latitude])
-      if (beginGeoPath(context, meridian, false)) context.stroke()
+      if (beginGeoPath(context, meridian)) context.stroke()
     }
     for (var parallel = -60; parallel <= 60; parallel += spacing) {
       var latitudeLine = []
       for (var lon = -180; lon <= 180; lon += 4) latitudeLine.push([lon, parallel])
-      if (beginGeoPath(context, latitudeLine, false)) context.stroke()
+      if (beginGeoPath(context, latitudeLine)) context.stroke()
     }
   }
 
-  function preparedRing(ring) {
-    if (!Array.isArray(ring) || ring.length < 3) return null
-    var longitudes = []
-    var latitudes = []
-    var previous = Model.longitudeNear(centreLongitude, coordinateLongitude(ring[0]))
-    longitudes.push(previous)
-    latitudes.push(coordinateLatitude(ring[0]))
-    var sum = previous
-    for (var i = 1; i < ring.length; i++) {
-      previous = Model.longitudeNear(previous, coordinateLongitude(ring[i]))
-      longitudes.push(previous)
-      latitudes.push(coordinateLatitude(ring[i]))
-      sum += previous
-    }
-    var mean = sum / longitudes.length
-    return { longitudes: longitudes, latitudes: latitudes, shift: Math.round((centreLongitude - mean) / 360) * 360 }
-  }
-
-  function paintCountryRing(context, ring) {
-    var prepared = preparedRing(ring)
-    if (!prepared) return
-    for (var copy = 0; copy <= 0; copy++) {
-      var shift = prepared.shift + copy * 360
-      var started = false
-      var any = false
-      var allVisible = true
-      context.beginPath()
-      for (var i = 0; i < prepared.longitudes.length; i++) {
-        var point = projectUnwrapped(prepared.latitudes[i], prepared.longitudes[i] + shift)
-        if (!point.visible) {
-          started = false
-          allVisible = false
-          continue
-        }
-        any = true
-        if (!started) {
-          context.moveTo(point.x, point.y)
-          started = true
-        } else {
-          context.lineTo(point.x, point.y)
-        }
+  function prepareCountryGeometry(rows) {
+    var prepared = []
+    var features = Array.isArray(rows) ? rows : []
+    for (var featureIndex = 0; featureIndex < features.length; featureIndex++) {
+      var geometry = features[featureIndex] && features[featureIndex].geometry
+      var polygons = geometry && Array.isArray(geometry.coordinates)
+        ? geometry.coordinates : []
+      for (var polygonIndex = 0; polygonIndex < polygons.length; polygonIndex++) {
+        var ring = polygons[polygonIndex] && polygons[polygonIndex][0]
+        var points = Model.prepareHemisphereRing(ring)
+        if (points.length >= 3) prepared.push(points)
       }
-      if (!any) continue
-      if (allVisible) context.closePath()
-      context.fill()
-      context.stroke()
     }
+    return prepared
+  }
+
+  function paintCountryRing(context, preparedRing) {
+    paintGeoFragments(context, Model.clippedPreparedHemisphereRings(
+      preparedRing, centreLatitude, centreLongitude))
   }
 
   function drawCountries(context) {
@@ -422,14 +561,9 @@ Item {
     context.strokeStyle = Qt.rgba(landOutlineColor.r, landOutlineColor.g, landOutlineColor.b, 0.76)
     context.lineWidth = zoom < 3 ? 0.75 : 1.0
     context.lineJoin = "round"
-    var rows = Array.isArray(countries) ? countries : []
+    var rows = Array.isArray(preparedCountryRings) ? preparedCountryRings : []
     for (var i = 0; i < rows.length; i++) {
-      var geometry = rows[i] && rows[i].geometry
-      var polygons = geometry && Array.isArray(geometry.coordinates) ? geometry.coordinates : []
-      for (var p = 0; p < polygons.length; p++) {
-        var ring = polygons[p] && polygons[p][0]
-        paintCountryRing(context, ring)
-      }
+      paintCountryRing(context, rows[i])
     }
   }
 
@@ -462,10 +596,7 @@ Item {
       context.fillStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.055)
       context.lineWidth = 1.6
       if (context.setLineDash) context.setLineDash([3, 4])
-      if (beginGeoPath(context, ring, true)) {
-        context.fill()
-        context.stroke()
-      }
+      paintGeoRing(context, ring)
       if (context.setLineDash) context.setLineDash([])
     }
 
@@ -493,20 +624,42 @@ Item {
     }
   }
 
+  function drawOpeningArrival(context) {
+    var place = Model.normalizeWatchPlace(openingArrivalPlace)
+    if (!place) return
+    var point = project(place.latitude, place.longitude)
+    if (!point.visible || point.x < -90 || point.x > width + 90
+        || point.y < -40 || point.y > height + 40) return
+    var radius = 6
+    context.fillStyle = surfaceColor
+    context.strokeStyle = coneColor
+    context.lineWidth = 1.8
+    context.beginPath()
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+    context.fillStyle = coneColor
+    context.beginPath()
+    context.arc(point.x, point.y, 2, 0, Math.PI * 2)
+    context.fill()
+    context.textAlign = "left"
+    context.textBaseline = "middle"
+    context.font = "700 10px '" + fontFamily + "'"
+    context.fillStyle = textColor
+    context.fillText("YOUR LOCATION · " + String(place.name || "LOCATION").toUpperCase(),
+      point.x + radius + 7, point.y)
+  }
+
   function drawCone(context, storm) {
     var rings = storm && Array.isArray(storm.cone) ? storm.cone : []
     context.fillStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.22)
     context.strokeStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.88)
     context.lineWidth = 1.4
-    for (var i = 0; i < rings.length; i++) {
-      if (!beginGeoPath(context, rings[i], true)) continue
-      context.fill()
-      context.stroke()
-    }
+    for (var i = 0; i < rings.length; i++) paintGeoRing(context, rings[i])
   }
 
   function drawPath(context, rows, color, widthValue, dashed) {
-    if (!Array.isArray(rows) || rows.length < 2 || !beginGeoPath(context, rows, false)) return
+    if (!Array.isArray(rows) || rows.length < 2 || !beginGeoPath(context, rows)) return
     context.strokeStyle = color
     context.lineWidth = widthValue
     context.lineCap = "round"
@@ -592,11 +745,7 @@ Item {
     context.strokeStyle = Qt.rgba(color.r, color.g, color.b, selected ? 0.96 : 0.62)
     context.lineWidth = selected ? 2 : 1.2
     if (context.setLineDash) context.setLineDash(selected ? [7, 5] : [4, 6])
-    for (var r = 0; r < rings.length; r++) {
-      if (!beginGeoPath(context, rings[r], true)) continue
-      context.fill()
-      context.stroke()
-    }
+    for (var r = 0; r < rings.length; r++) paintGeoRing(context, rings[r])
     if (context.setLineDash) context.setLineDash([])
     drawOutlookConnector(context, outlook, color, selected)
 
@@ -744,6 +893,7 @@ Item {
     drawCountryLabels(context)
     if (mode === "earthquakes") {
       for (var e = 0; e < systems.length; e++) drawEarthquakeMarker(context, systems[e])
+      drawOpeningArrival(context)
     } else {
       var draftId = draftWatchPlace ? String(draftWatchPlace.id || "") : ""
       for (var w = 0; w < watchPlaces.length; w++) {
@@ -769,6 +919,37 @@ Item {
     context.stroke()
   }
 
+  ParallelAnimation {
+    id: openingFlight
+
+    NumberAnimation {
+      id: openingLatitude
+      target: root
+      property: "centreLatitude"
+      duration: 1080
+      easing.type: Easing.InOutSine
+    }
+    NumberAnimation {
+      id: openingLongitude
+      target: root
+      property: "centreLongitude"
+      duration: 1080
+      easing.type: Easing.InOutSine
+    }
+    NumberAnimation {
+      id: openingZoom
+      target: root
+      property: "zoom"
+      duration: 1080
+      easing.type: Easing.InOutSine
+    }
+    onFinished: {
+      root.centreLongitude = Model.wrapLongitude(root.openingFlightTargetLongitude)
+      root.openingArrivalPlace = null
+      canvas.requestPaint()
+    }
+  }
+
   FileView {
     path: Qt.resolvedUrl("assets/countries.json").toString().replace(/^file:\/\//, "")
     watchChanges: false
@@ -777,8 +958,10 @@ Item {
       try {
         var collection = JSON.parse(text())
         root.countries = Array.isArray(collection.features) ? collection.features : []
+        root.preparedCountryRings = root.prepareCountryGeometry(root.countries)
       } catch (error) {
         root.countries = []
+        root.preparedCountryRings = []
       }
       canvas.requestPaint()
     }
@@ -790,6 +973,38 @@ Item {
     antialiasing: true
     renderStrategy: Canvas.Immediate
     onPaint: root.paint(getContext("2d"))
+  }
+
+  FrameAnimation {
+    id: momentumAnimation
+    running: false
+
+    onTriggered: {
+      if (!root.motionEnabled || pointer.pressed || !root.visible) {
+        root.stopMomentum()
+        return
+      }
+      var elapsed = Math.max(1, frameTime * 1000)
+      var step = Model.dragMomentumStep(pointer.velocityX, pointer.velocityY, elapsed)
+      pointer.velocityX = step.velocityX
+      pointer.velocityY = step.velocityY
+
+      var latitudeDegreesPerPixel = 57.2957795 / root.globeRadius
+      var longitudeDegreesPerPixel = latitudeDegreesPerPixel
+        / Math.max(0.28, Math.cos(root.centreLatitude * Math.PI / 180))
+      root.centreLongitude = Model.wrapLongitude(
+        root.centreLongitude - step.deltaX * longitudeDegreesPerPixel)
+      var unclampedLatitude = root.centreLatitude
+        + step.deltaY * latitudeDegreesPerPixel
+      var nextLatitude = Model.clamp(unclampedLatitude, -82, 82)
+      root.centreLatitude = nextLatitude
+      if (Math.abs(unclampedLatitude - nextLatitude) > 0.000001)
+        pointer.velocityY = 0
+      root.userMoved = true
+
+      if (!step.active || Math.hypot(pointer.velocityX, pointer.velocityY) < 18)
+        root.finishMomentum()
+    }
   }
 
   MouseArea {
@@ -804,18 +1019,34 @@ Item {
     property real previousX: 0
     property real previousY: 0
     property real travel: 0
+    property real velocityX: 0
+    property real velocityY: 0
+    property double previousSampleTime: 0
+    property bool interruptedMomentum: false
 
     onPressed: function(mouse) {
+      interruptedMomentum = momentumAnimation.running
+      root.cancelOpeningFlight()
       previousX = mouse.x
       previousY = mouse.y
       travel = 0
+      velocityX = 0
+      velocityY = 0
+      previousSampleTime = Date.now()
       root.pointerActivity()
     }
     onPositionChanged: function(mouse) {
       if (pressed) {
         var dx = mouse.x - previousX
         var dy = mouse.y - previousY
+        var now = Date.now()
+        var elapsed = now - previousSampleTime
         travel += Math.abs(dx) + Math.abs(dy)
+        if (elapsed > 0 && (dx !== 0 || dy !== 0)) {
+          velocityX = Model.dragVelocity(velocityX, dx, elapsed)
+          velocityY = Model.dragVelocity(velocityY, dy, elapsed)
+          previousSampleTime = now
+        }
         var latitudeDegreesPerPixel = 57.2957795 / root.globeRadius
         var longitudeDegreesPerPixel = latitudeDegreesPerPixel
           / Math.max(0.28, Math.cos(root.centreLatitude * Math.PI / 180))
@@ -832,7 +1063,7 @@ Item {
       root.pointerActivity()
     }
     onReleased: function(mouse) {
-      if (travel < 7) {
+      if (travel < 7 && !interruptedMomentum) {
         if (root.placementMode) {
           var coordinate = root.unproject(mouse.x, mouse.y)
           if (coordinate) root.placePicked(coordinate.latitude, coordinate.longitude)
@@ -843,13 +1074,21 @@ Item {
           else if (place) root.placeActivated(place.id)
         }
       }
-      if (!root.placementMode) root.updateHover(mouse.x, mouse.y)
+      var momentumStarted = root.startMomentum()
+      if (!momentumStarted && !root.placementMode)
+        root.updateHover(mouse.x, mouse.y)
+      interruptedMomentum = false
+    }
+    onCanceled: {
+      interruptedMomentum = false
+      root.stopMomentum()
     }
     onExited: {
       if (!pressed) root.clearHover()
       canvas.requestPaint()
     }
     onWheel: function(wheel) {
+      root.cancelOpeningFlight()
       root.zoomAt(wheel.angleDelta.y > 0 ? 1.22 : 1 / 1.22, wheel.x, wheel.y)
       root.pointerActivity()
       wheel.accepted = true
@@ -925,9 +1164,10 @@ Item {
   onEarthquakesChanged: canvas.requestPaint()
   onWatchPlacesChanged: canvas.requestPaint()
   onModeChanged: {
+    cancelOpeningFlight()
     clearHover()
     canvas.requestPaint()
-    scheduleFitSelected(true)
+    if (!layerSwitchInProgress) scheduleFitSelected(true)
   }
   onSelectedKeyChanged: scheduleFitSelected(true)
   onPreferOverviewChanged: if (mode === "earthquakes") scheduleFitSelected(true)
@@ -946,5 +1186,7 @@ Item {
   onOceanColorChanged: canvas.requestPaint()
   onLandColorChanged: canvas.requestPaint()
   onConeColorChanged: canvas.requestPaint()
+  onMotionEnabledChanged: if (!motionEnabled) stopMomentum()
+  onVisibleChanged: if (!visible) stopMomentum()
   Component.onCompleted: scheduleFitSelected(true)
 }

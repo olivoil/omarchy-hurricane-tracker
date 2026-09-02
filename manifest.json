@@ -69,7 +69,7 @@
         "type": "boolean",
         "label": "Online place lookup",
         "defaultValue": true,
-        "description": "Allow typed place searches through Open-Meteo and nearby-place naming for map clicks through OpenStreetMap. Turn this off to keep map placement local."
+        "description": "Allow typed place searches through Open-Meteo, nearby-place naming through OpenStreetMap, and a one-time coarse location lookup when Omarchy has no saved weather coordinates. Turn this off to keep location setup local."
       },
       {
         "key": "alertRegion",

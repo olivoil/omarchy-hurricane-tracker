@@ -72,6 +72,61 @@ class PluginContractTests(unittest.TestCase):
         )
         self.assertLess(point_count, 12000)
 
+    def test_country_fill_is_clipped_to_the_curved_visible_horizon(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        country_paint = storm_map.split("function paintCountryRing", 1)[1].split(
+            "function drawCountries", 1
+        )[0]
+        fragment_paint = storm_map.split(
+            "function paintGeoFragments(context, fragments)", 1
+        )[1].split("function paintGeoRing", 1)[0]
+
+        self.assertIn("Model.clippedPreparedHemisphereRings", country_paint)
+        self.assertIn("paintGeoFragments", country_paint)
+        self.assertIn("fragment.boundaryLength", fragment_paint)
+        self.assertIn("if (!fragment.clipped) context.closePath()", fragment_paint)
+        self.assertNotIn("allVisible", country_paint)
+
+    def test_country_geometry_is_prepared_once_instead_of_during_each_paint(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        country_paint = storm_map.split("function paintCountryRing", 1)[1].split(
+            "function drawCountries", 1
+        )[0]
+        country_draw = storm_map.split("function drawCountries", 1)[1].split(
+            "function drawCountryLabels", 1
+        )[0]
+
+        self.assertIn("property var preparedCountryRings", storm_map)
+        self.assertIn("function prepareCountryGeometry", storm_map)
+        self.assertIn("Model.clippedPreparedHemisphereRings", country_paint)
+        self.assertIn("preparedCountryRings", country_draw)
+
+    def test_hazard_outlines_exclude_synthetic_horizon_closures(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        self.assertIn("function paintGeoFragments(context, fragments)", storm_map)
+        fragment_paint = storm_map.split(
+            "function paintGeoFragments(context, fragments)", 1
+        )[1].split("function paintGeoRing", 1)[0]
+        self.assertIn("boundaryIndex < fragment.boundaryLength", fragment_paint)
+        self.assertIn("if (!fragment.clipped) context.closePath()", fragment_paint)
+
+        watch_place = storm_map.split("function drawWatchPlace", 1)[1].split(
+            "function drawOpeningArrival", 1
+        )[0]
+        cone = storm_map.split("function drawCone", 1)[1].split(
+            "function drawPath", 1
+        )[0]
+        outlook = storm_map.split("function drawOutlook(context", 1)[1].split(
+            "function earthquakeRadius", 1
+        )[0]
+        self.assertIn("paintGeoRing(context, ring)", watch_place)
+        self.assertIn("paintGeoRing(context, rings[i])", cone)
+        self.assertIn("paintGeoRing(context, rings[r])", outlook)
+        self.assertNotIn("beginGeoPath(context, ring, true)", watch_place)
+        self.assertNotIn("beginGeoPath(context, rings[i], true)", cone)
+        self.assertNotIn("beginGeoPath(context, rings[r], true)", outlook)
+
     def test_outlook_connectors_are_drawn_as_directional_links(self):
         storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
 
@@ -84,6 +139,189 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("function scheduleFitSelected(force)", storm_map)
         self.assertIn("if (!root.autoFitSelection", storm_map)
         self.assertNotIn("onSelectedKeyChanged: if (autoFitSelection)", storm_map)
+
+    def test_default_location_is_one_time_removable_and_drives_opening_flight(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        bar_widget = (ROOT / "BarWidget.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        self.assertIn('readonly property string defaultWatchPlaceId: "user-location"', service)
+        self.assertIn("property bool defaultLocationInitialized: false", service)
+        self.assertIn("property bool settingsReady: false", service)
+        apply_settings = service.split("function applySettings(value)", 1)[1].split(
+            "function setting(name, fallback)", 1
+        )[0]
+        self.assertIn("settingsReady = true", apply_settings)
+        self.assertIn("root.tracker.applySettings(root.settings)", bar_widget)
+        self.assertIn("defaultLocationInitialized: defaultLocationInitialized", service)
+        self.assertIn('[backendPath, "default-location"]', service)
+        self.assertIn('command.push("--allow-network")', service)
+        self.assertIn('["hyprctl", "getoption", "animations:enabled", "-j"]', service)
+        apply_default = service.split("function applyDefaultLocation(raw)", 1)[1].split(
+            "function requestDefaultLocation()", 1
+        )[0]
+        self.assertLess(
+            apply_default.index("upsertWatchPlace(place, false)"),
+            apply_default.index("defaultLocationInitialized = true"),
+        )
+        self.assertLess(
+            apply_default.index("defaultLocationInitialized = true"),
+            apply_default.index("persistWatchPlaces()"),
+        )
+        self.assertIn("function beginOpeningView(payload)", overlay)
+        self.assertIn("tracker.defaultWatchPlace", overlay)
+        self.assertIn("stormMap.beginOpeningFlight(place", overlay)
+        opening_attempt = overlay.split(
+            "function tryDefaultLocationArrival()", 1
+        )[1].split("function beginOpeningView(payload)", 1)[0]
+        self.assertIn("stormMap.width < 40 || stormMap.height < 40", opening_attempt)
+        self.assertIn("openingLocationRetry.restart()", opening_attempt)
+        self.assertLess(
+            opening_attempt.index("stormMap.beginOpeningFlight(place"),
+            opening_attempt.index("cancelPendingLocationArrival()"),
+        )
+        self.assertIn("id: openingLocationRetry", overlay)
+        cancel_pending = overlay.split(
+            "function cancelPendingLocationArrival()", 1
+        )[1].split("function tryDefaultLocationArrival()", 1)[0]
+        self.assertIn("openingLocationRetry.stop()", cancel_pending)
+        self.assertIn("function beginOpeningFlight(place, animate)", storm_map)
+        self.assertIn("function drawOpeningArrival(context)", storm_map)
+        self.assertIn('"YOUR LOCATION · "', storm_map)
+        self.assertIn("zoom = minimumZoom", storm_map)
+        self.assertIn("ParallelAnimation", storm_map)
+        self.assertIn("Easing.InOutSine", storm_map)
+        self.assertIn("root.cancelOpeningFlight()", storm_map)
+
+    def test_default_location_arrival_waits_for_lookup_and_clears_its_marker(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        apply_motion = service.split("function applyMotionPreference(raw)", 1)[1].split(
+            "function normalizedPlaceSearchQuery", 1
+        )[0]
+        self.assertIn("Model.motionPreferenceValue(raw)", apply_motion)
+
+        timeout = overlay.split("id: openingLocationTimeout", 1)[1].split(
+            "PanelWindow", 1
+        )[0]
+        self.assertIn("interval: 6500", timeout)
+        self.assertIn("root.defaultLocationLoading", timeout)
+        self.assertIn("openingLocationTimeout.restart()", timeout)
+
+        begin_flight = storm_map.split("function beginOpeningFlight(place, animate)", 1)[1].split(
+            "function scheduleFitSelected", 1
+        )[0]
+        reduced_motion = begin_flight.split("if (animate !== true)", 1)[1].split(
+            "var startLatitude", 1
+        )[0]
+        animation_finished = storm_map.split("id: openingFlight", 1)[1].split(
+            "FileView", 1
+        )[0]
+        self.assertIn("openingArrivalPlace = null", reduced_motion)
+        self.assertIn("root.openingArrivalPlace = null", animation_finished)
+
+    def test_plain_open_starts_with_no_selected_system(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        open_function = overlay.split("function open(payloadJson)", 1)[1].split(
+            "function close()", 1
+        )[0]
+
+        self.assertIn('cycloneSelection = ""', open_function)
+        self.assertIn('earthquakeSelection = ""', open_function)
+        self.assertIn('selectedKey = ""', open_function)
+        self.assertLess(
+            open_function.index('selectedKey = ""'),
+            open_function.index("if (payload.stormId)"),
+        )
+        self.assertLess(
+            open_function.index('selectedKey = ""'),
+            open_function.index("syncSelection(true)"),
+        )
+
+    def test_opening_flight_starts_immediately_with_a_smooth_camera_curve(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        opening_flight = storm_map.split("id: openingFlight", 1)[1].split(
+            "FileView {", 1
+        )[0]
+
+        self.assertNotIn("PauseAnimation", opening_flight)
+        self.assertNotIn("Easing.OutQuint", opening_flight)
+        self.assertEqual(opening_flight.count("Easing.InOutSine"), 3)
+
+    def test_globe_drag_has_interruptible_reduced_motion_aware_momentum(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        map_wiring = overlay.split("StormMap {", 1)[1].split(
+            "BorderSurface {", 1
+        )[0]
+        pointer_input = storm_map.split("MouseArea {", 1)[1].split(
+            "Rectangle {", 1
+        )[0]
+
+        self.assertIn("property bool motionEnabled", storm_map)
+        self.assertIn("onMotionEnabledChanged:", storm_map)
+        self.assertIn("function stopMomentum()", storm_map)
+        self.assertIn("FrameAnimation {", storm_map)
+        self.assertIn("id: momentumAnimation", storm_map)
+        self.assertIn("Model.dragMomentumStep", storm_map)
+        self.assertIn("Model.dragVelocity", pointer_input)
+        self.assertIn("root.startMomentum()", pointer_input)
+        self.assertIn("interruptedMomentum = momentumAnimation.running", pointer_input)
+        self.assertIn("travel < 7 && !interruptedMomentum", pointer_input)
+        self.assertIn("motionEnabled:", map_wiring)
+        self.assertIn("root.tracker.motionEnabled", map_wiring)
+
+    def test_tracker_switch_preserves_the_current_map_viewport(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        activate_tracker = overlay.split("function activateTracker(identifier)", 1)[1].split(
+            "function syncSelection", 1
+        )[0]
+        schedule_fit = storm_map.split("function scheduleFitSelected(force)", 1)[1].split(
+            "function showGlobe", 1
+        )[0]
+        mode_change = storm_map.split("onModeChanged:", 1)[1].split(
+            "onSelectedKeyChanged:", 1
+        )[0]
+
+        self.assertIn("property bool layerSwitchInProgress: false", storm_map)
+        self.assertIn("property real cameraOffsetY: 0", storm_map)
+        self.assertIn("property real layerSwitchMapCenterY: 0", storm_map)
+        self.assertIn("property real layerSwitchGlobeRadius: 0", storm_map)
+        self.assertIn("readonly property real mapCenterY: layerSwitchInProgress", storm_map)
+        self.assertIn("? layerSwitchMapCenterY : viewHeight / 2 + cameraOffsetY", storm_map)
+        self.assertIn("readonly property real globeRadius: layerSwitchInProgress", storm_map)
+        self.assertIn("? layerSwitchGlobeRadius : baseGlobeRadius * zoom", storm_map)
+        self.assertIn("function beginLayerSwitch()", storm_map)
+        self.assertIn("function finishLayerSwitch()", storm_map)
+        begin_switch = storm_map.split("function beginLayerSwitch()", 1)[1].split(
+            "function finishLayerSwitch()", 1
+        )[0]
+        finish_switch = storm_map.split("function finishLayerSwitch()", 1)[1].split(
+            "function stopMomentum()", 1
+        )[0]
+        self.assertIn("layerSwitchMapCenterY = mapCenterY", begin_switch)
+        self.assertIn("layerSwitchGlobeRadius = globeRadius", begin_switch)
+        self.assertLess(
+            begin_switch.index("layerSwitchGlobeRadius = globeRadius"),
+            begin_switch.index("layerSwitchInProgress = true"),
+        )
+        self.assertIn("cameraOffsetY = layerSwitchMapCenterY - viewHeight / 2", finish_switch)
+        self.assertIn("zoom = layerSwitchGlobeRadius / baseGlobeRadius", finish_switch)
+        self.assertLess(
+            activate_tracker.index("stormMap.beginLayerSwitch()"),
+            activate_tracker.index("activeTrackerId = id"),
+        )
+        self.assertIn("stormMap.finishLayerSwitch()", activate_tracker)
+        self.assertIn("if (layerSwitchInProgress) return", schedule_fit)
+        self.assertIn("root.layerSwitchInProgress", schedule_fit)
+        self.assertIn(
+            "if (!layerSwitchInProgress) scheduleFitSelected(true)",
+            mode_change,
+        )
 
     def test_navigation_shell_keeps_alerts_global_and_trackers_extensible(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")

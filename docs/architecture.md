@@ -8,6 +8,7 @@ BarWidget.qml ────────┐
 HurricaneTracker.qml ─┘                                                     ├─ USGS earthquakes
         └─ StormMap.qml + Model.js + Natural Earth geometry                 ├─ Open-Meteo search
                                                                             ├─ Nominatim reverse lookup
+                                                                            ├─ Omarchy/wttr.in default location
                                                                             └─ user cache/config
 ```
 
@@ -36,7 +37,17 @@ modes, including earthquakes, one shared unit policy.
 Watch places are a versioned local configuration, not part of the public NHC
 payload. The helper validates at most 12 named coordinates with bounded radii
 and atomically writes them with user-only permissions under the XDG config
-directory. Saving coordinates never makes a network request.
+directory. The schema also remembers whether the one-time default location has
+been initialized, so removing it is durable. Saving coordinates never makes a
+network request.
+
+The first default alert reuses exact coordinates from Omarchy's weather state
+when present. If the state only has a name, the existing Open-Meteo path resolves
+it. With no configured weather location, the helper can make one bounded request
+to wttr.in for a coarse IP-based city. The latter two paths run only while online
+place lookup is enabled. The service exposes the resulting reserved watch place
+to the overlay, but it otherwise behaves like an ordinary editable and removable
+place.
 
 Typed geographic searches use a separate short-lived process and never share
 the cyclone refresh process. QML debounces input, keeps only the newest queued
@@ -78,6 +89,8 @@ shell's normal plugin IPC route.
    results, while stale reverse results are discarded before reaching the UI.
 9. Downloads the fixed USGS M4.5+ weekly GeoJSON feed, rejects non-earthquake
    features and invalid event geometry, and writes a separate private cache.
+10. Resolves the one-time default alert from local Omarchy weather coordinates,
+    or from a bounded allowlisted lookup when online location lookup is enabled.
 
 Remote text is normalized before it reaches QML. Browser actions are checked
 again against NHC, USGS, and tsunami-information hostname allowlists in
@@ -89,7 +102,12 @@ again against NHC, USGS, and tsunami-information hostname allowlists in
 every scale. Zooming grows the sphere beyond the viewport, so curvature becomes
 negligible around a storm without a geometric handoff to a flat map. Dragging
 rotates the globe and feels like panning at close scale. The map remains offline
-after the bundled Natural Earth geometry has loaded. It draws:
+after the bundled Natural Earth geometry has loaded. A normal open starts with
+the whole sphere, rotates toward the default location, and zooms to its watch
+point. The earthquake layer uses a clearly labeled temporary arrival marker so
+the camera target is not confused with an earthquake alert. Pointer or keyboard
+map interaction cancels the flight, and the flight is skipped when Hyprland
+animations are disabled. It draws:
 
 - subdued country geometry and geographic grid;
 - the selected official cone;

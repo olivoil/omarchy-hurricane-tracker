@@ -38,6 +38,8 @@ Item {
   property bool placeSearchMenuOpen: false
   property int placeSearchHighlightIndex: -1
   property string pendingRemovePlaceId: ""
+  property bool pendingLocationArrival: false
+  property var pendingOpeningPayload: null
   property int clockTick: 0
 
   onDraftPlaceNameChanged: {
@@ -62,6 +64,10 @@ Item {
   readonly property var earthquakes: tracker && Array.isArray(tracker.earthquakes)
     ? tracker.earthquakes : []
   readonly property var watchPlaces: tracker && Array.isArray(tracker.watchPlaces) ? tracker.watchPlaces : []
+  readonly property bool defaultLocationLoading: tracker
+    && tracker.defaultLocationLoading === true
+  readonly property string watchLocationError: tracker
+    ? String(tracker.watchPlacesError || tracker.defaultLocationError || "") : ""
   readonly property var placeSearchResults: tracker && Array.isArray(tracker.placeSearchResults)
     ? tracker.placeSearchResults : []
   readonly property bool placeSearchLoading: tracker && tracker.placeSearchLoading === true
@@ -291,9 +297,78 @@ Item {
     return partial ? "Partial · " + age : age
   }
 
+  function shouldUseDefaultLocationArrival(payload) {
+    return sidebarMode === "activity"
+      && payload.globe !== true && payload.alerts !== true
+      && !payload.stormId && !payload.outlookId && !payload.earthquakeId
+      && payload.mode !== "earthquakes"
+  }
+
+  function applyRequestedMapView(payload) {
+    var request = payload || ({})
+    if (request.globe === true || (earthquakeMode && earthquakeOverview))
+      showGlobe()
+    else if (sidebarMode === "alerts" && selectedPlace) {
+      if (editingWatchPlace) stormMap.fitWatchPlace(selectedPlace)
+      else stormMap.focusWatchPlace(selectedPlace)
+    }
+    else if (regionOverviewBasin)
+      stormMap.fitRegion(regionOverviewBasin)
+    else stormMap.fitSelected()
+  }
+
+  function cancelPendingLocationArrival() {
+    pendingLocationArrival = false
+    pendingOpeningPayload = null
+    openingLocationRetry.stop()
+    openingLocationTimeout.stop()
+  }
+
+  function tryDefaultLocationArrival() {
+    if (!opened || !pendingLocationArrival || !tracker
+        || tracker.watchPlacesLoaded !== true
+        || tracker.motionPreferenceKnown !== true
+        || tracker.defaultLocationReady !== true) return false
+    var payload = pendingOpeningPayload || ({})
+    var place = tracker.defaultWatchPlace || null
+    if (place) {
+      if (stormMap.width < 40 || stormMap.height < 40) {
+        openingLocationRetry.restart()
+        return false
+      }
+      if (stormMap.beginOpeningFlight(place, tracker.motionEnabled === true)) {
+        cancelPendingLocationArrival()
+        return true
+      }
+    }
+    cancelPendingLocationArrival()
+    applyRequestedMapView(payload)
+    return false
+  }
+
+  function beginOpeningView(payload) {
+    var request = payload || ({})
+    cancelPendingLocationArrival()
+    if (!shouldUseDefaultLocationArrival(request)) {
+      applyRequestedMapView(request)
+      return
+    }
+    regionOverviewBasin = ""
+    pendingOpeningPayload = request
+    pendingLocationArrival = true
+    stormMap.showGlobe()
+    openingLocationTimeout.restart()
+    tryDefaultLocationArrival()
+  }
+
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
+    cycloneSelection = ""
+    earthquakeSelection = ""
+    selectedKey = ""
+    regionOverviewBasin = ""
+    earthquakeOverview = true
     if (payload.stormId || payload.outlookId || payload.mode === "cyclones")
       activeTrackerId = "cyclones"
     else if (payload.earthquakeId || payload.mode === "earthquakes")
@@ -324,24 +399,19 @@ Item {
         || (!tracker.earthquakeHasLoaded && !tracker.earthquakeLoading))) tracker.refresh()
     Qt.callLater(function() {
       keyCatcher.forceActiveFocus()
-      if (payload.globe === true || (root.earthquakeMode && root.earthquakeOverview))
-        root.showGlobe()
-      else if (root.sidebarMode === "alerts" && root.selectedPlace) {
-        if (root.editingWatchPlace) stormMap.fitWatchPlace(root.selectedPlace)
-        else stormMap.focusWatchPlace(root.selectedPlace)
-      }
-      else if (root.regionOverviewBasin)
-        stormMap.fitRegion(root.regionOverviewBasin)
-      else stormMap.fitSelected()
+      root.beginOpeningView(payload)
     })
   }
 
   function close() {
     if (editingWatchPlace) cancelWatchPlaceEditor()
+    cancelPendingLocationArrival()
+    stormMap.cancelOpeningFlight()
     opened = false
   }
 
   function showGlobe(_payload) {
+    cancelPendingLocationArrival()
     regionOverviewBasin = ""
     if (sidebarMode === "activity" && earthquakeMode) earthquakeOverview = true
     stormMap.showGlobe()
@@ -354,6 +424,7 @@ Item {
   }
 
   function showActivity() {
+    cancelPendingLocationArrival()
     if (editingWatchPlace) cancelWatchPlaceEditor()
     trackerMenuOpen = false
     sidebarMode = "activity"
@@ -361,6 +432,7 @@ Item {
   }
 
   function showAlerts() {
+    cancelPendingLocationArrival()
     trackerMenuOpen = false
     sidebarMode = "alerts"
     keyCatcher.forceActiveFocus()
@@ -372,16 +444,19 @@ Item {
   }
 
   function toggleTrackerMenu() {
+    cancelPendingLocationArrival()
     if (sidebarMode !== "activity") sidebarMode = "activity"
     trackerMenuOpen = !trackerMenuOpen
     keyCatcher.forceActiveFocus()
   }
 
   function activateTracker(identifier) {
+    cancelPendingLocationArrival()
     var id = String(identifier || "")
     for (var i = 0; i < trackerDefinitions.length; i++) {
       var definition = trackerDefinitions[i]
       if (definition.id !== id || !definition.available) continue
+      stormMap.beginLayerSwitch()
       if (activeTrackerId === "earthquakes") earthquakeSelection = selectedKey
       else cycloneSelection = selectedKey
       activeTrackerId = id
@@ -389,7 +464,10 @@ Item {
       regionOverviewBasin = ""
       sidebarMode = "activity"
       trackerMenuOpen = false
-      Qt.callLater(function() { root.syncSelection(true) })
+      Qt.callLater(function() {
+        root.syncSelection(true)
+        Qt.callLater(function() { stormMap.finishLayerSwitch() })
+      })
       keyCatcher.forceActiveFocus()
       return
     }
@@ -487,6 +565,7 @@ Item {
 
   function viewRegion(basin) {
     if (!basin || earthquakeMode) return
+    cancelPendingLocationArrival()
     regionOverviewBasin = basin
     selectedKey = ""
     fitRegionOverview(basin)
@@ -496,6 +575,7 @@ Item {
   function selectSystem(key) {
     var system = Model.systemByKey(systems, key)
     if (!system) return
+    cancelPendingLocationArrival()
     sidebarMode = "activity"
     trackerMenuOpen = false
     selectedPlaceId = ""
@@ -556,6 +636,7 @@ Item {
   function selectWatchPlace(identifier) {
     var place = watchPlaceById(identifier)
     if (!place) return
+    cancelPendingLocationArrival()
     sidebarMode = "alerts"
     trackerMenuOpen = false
     selectedPlaceId = place.id
@@ -574,6 +655,7 @@ Item {
 
   function beginAddWatchPlace() {
     if (!tracker || !tracker.watchPlacesLoaded || watchPlaces.length >= 12) return
+    cancelPendingLocationArrival()
     sidebarMode = "alerts"
     trackerMenuOpen = false
     editingWatchPlace = true
@@ -591,6 +673,7 @@ Item {
   function beginEditWatchPlace(identifier) {
     var place = watchPlaceById(identifier)
     if (!place) return
+    cancelPendingLocationArrival()
     sidebarMode = "alerts"
     trackerMenuOpen = false
     editingWatchPlace = true
@@ -894,7 +977,10 @@ Item {
     function onWatchPlacesChanged() {
       if (root.selectedPlaceId && !root.watchPlaceById(root.selectedPlaceId))
         root.selectedPlaceId = ""
+      root.tryDefaultLocationArrival()
     }
+    function onDefaultLocationReadyChanged() { root.tryDefaultLocationArrival() }
+    function onMotionPreferenceKnownChanged() { root.tryDefaultLocationArrival() }
     function onReverseGeocodeResultChanged() {
       Qt.callLater(function() {
         if (root.tracker)
@@ -938,6 +1024,29 @@ Item {
       if (root.tracker && root.tracker.searchPlaces
           && root.draftPlaceSearchQuery.trim().length >= 2)
         root.tracker.searchPlaces(root.draftPlaceSearchQuery)
+    }
+  }
+
+  Timer {
+    id: openingLocationRetry
+    interval: 32
+    repeat: false
+    onTriggered: root.tryDefaultLocationArrival()
+  }
+
+  Timer {
+    id: openingLocationTimeout
+    interval: 6500
+    repeat: false
+    onTriggered: {
+      if (!root.pendingLocationArrival) return
+      if (root.defaultLocationLoading) {
+        openingLocationTimeout.restart()
+        return
+      }
+      var payload = root.pendingOpeningPayload || ({})
+      root.cancelPendingLocationArrival()
+      root.applyRequestedMapView(payload)
     }
   }
 
@@ -1201,6 +1310,7 @@ Item {
           placementMode: root.sidebarMode === "alerts" && root.editingWatchPlace
           draftWatchPlace: root.draftWatchPlace
           useImperial: root.useImperial
+          motionEnabled: root.tracker && root.tracker.motionEnabled === true
           bottomInset: root.sidebarMode === "activity" && root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean
@@ -1219,7 +1329,10 @@ Item {
           onPlacePicked: function(latitude, longitude) {
             root.setDraftWatchCoordinate(latitude, longitude)
           }
-          onPointerActivity: keyCatcher.forceActiveFocus()
+          onPointerActivity: {
+            root.cancelPendingLocationArrival()
+            keyCatcher.forceActiveFocus()
+          }
         }
 
         BorderSurface {
@@ -3171,7 +3284,8 @@ Item {
                 anchors.rightMargin: Style.space(13)
                 anchors.top: parent.top
                 anchors.topMargin: Style.space(13)
-                text: root.alertDestinationCount === 0 ? "NO LOCATIONS WATCHED"
+                text: root.alertDestinationCount === 0
+                  ? (root.defaultLocationLoading ? "LOCATING DEFAULT ALERT" : "NO LOCATIONS WATCHED")
                   : (root.alertUpdateCount > 0
                     ? String(root.alertUpdateCount) + (root.alertUpdateCount === 1
                       ? " LOCATION NEEDS ATTENTION" : " LOCATIONS NEED ATTENTION")
@@ -3196,7 +3310,9 @@ Item {
                 anchors.top: alertsSummaryTitle.bottom
                 anchors.topMargin: Style.space(6)
                 text: root.alertDestinationCount === 0
-                  ? "Save a location for calm heads-ups from official formation areas and forecast paths. Alert perimeters appear only while editing."
+                  ? (root.defaultLocationLoading
+                    ? "Using your Omarchy weather location to create a removable default alert."
+                    : "Save a location for calm heads-ups from official formation areas and forecast paths. Alert perimeters appear only while editing.")
                   : (root.alertUpdateCount === 0 && root.alertLimitedDestinationCount > 0
                     ? "Some official source or forecast data is unavailable. Review each location below for coverage."
                     : "Official formation areas and forecast paths are monitored for each location. Alert perimeters appear only while editing.")
@@ -3218,7 +3334,7 @@ Item {
 
             Text {
               id: watchSaveError
-              visible: root.tracker && root.tracker.watchPlacesError !== ""
+              visible: root.watchLocationError !== ""
               anchors.left: parent.left
               anchors.leftMargin: Style.spacing.lg
               anchors.right: parent.right
@@ -3226,7 +3342,7 @@ Item {
               anchors.top: alertsSummary.bottom
               anchors.topMargin: Style.spacing.md
               height: visible ? implicitHeight : 0
-              text: root.tracker ? root.tracker.watchPlacesError : ""
+              text: root.watchLocationError
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               color: "#e9be62"
@@ -3342,6 +3458,7 @@ Item {
                   anchors.top: placeName.bottom
                   anchors.topMargin: Style.space(4)
                   text: root.watchPlaceCoordinateLabel(place)
+                    + (place && place.id === "user-location" ? " · DEFAULT" : "")
                   textFormat: Text.PlainText
                   color: root.dim
                   elide: Text.ElideRight
@@ -3518,7 +3635,8 @@ Item {
                 }
                 Text {
                   anchors.horizontalCenter: parent.horizontalCenter
-                  text: "No alert destinations yet"
+                  text: root.defaultLocationLoading
+                    ? "Finding your location" : "No alert destinations yet"
                   color: root.foreground
                   font.family: Style.font.menuFamily
                   font.pixelSize: Style.font.title
@@ -3527,7 +3645,9 @@ Item {
                 Text {
                   width: parent.width
                   horizontalAlignment: Text.AlignHCenter
-                  text: "Save home, family, or a destination. Alert locations remain on this computer."
+                  text: root.defaultLocationLoading
+                    ? "The whole globe stays available while the tracker checks your Omarchy weather location."
+                    : "Save home, family, or a destination. Alert locations remain on this computer."
                   textFormat: Text.PlainText
                   wrapMode: Text.WordWrap
                   color: root.dim

@@ -41,7 +41,10 @@ BarWidget {
         : (bar ? bar.barForeground : Color.foreground)))
 
   function syncService() {
-    if (root.tracker && "settings" in root.tracker) root.tracker.settings = root.settings
+    if (!root.tracker) return
+    if (typeof root.tracker.applySettings === "function")
+      root.tracker.applySettings(root.settings)
+    else if ("settings" in root.tracker) root.tracker.settings = root.settings
   }
 
   function refresh() {
