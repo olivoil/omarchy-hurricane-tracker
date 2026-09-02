@@ -17,6 +17,10 @@ Item {
   property string regionOverviewBasin: ""
   property string sidebarMode: "activity"
   property string activeTrackerId: "cyclones"
+  property string cycloneSelection: ""
+  property string earthquakeSelection: ""
+  property bool earthquakeOverview: true
+  property var collapsedEarthquakeSections: ({})
   property bool trackerMenuOpen: false
   property string selectedPlaceId: ""
   property bool editingWatchPlace: false
@@ -34,6 +38,8 @@ Item {
   property bool placeSearchMenuOpen: false
   property int placeSearchHighlightIndex: -1
   property string pendingRemovePlaceId: ""
+  property bool pendingLocationArrival: false
+  property var pendingOpeningPayload: null
   property int clockTick: 0
 
   onDraftPlaceNameChanged: {
@@ -55,7 +61,13 @@ Item {
     : Qt.locale().measurementSystem !== Locale.MetricSystem
   readonly property var storms: tracker && Array.isArray(tracker.storms) ? tracker.storms : []
   readonly property var outlooks: tracker && Array.isArray(tracker.outlooks) ? tracker.outlooks : []
+  readonly property var earthquakes: tracker && Array.isArray(tracker.earthquakes)
+    ? tracker.earthquakes : []
   readonly property var watchPlaces: tracker && Array.isArray(tracker.watchPlaces) ? tracker.watchPlaces : []
+  readonly property bool defaultLocationLoading: tracker
+    && tracker.defaultLocationLoading === true
+  readonly property string watchLocationError: tracker
+    ? String(tracker.watchPlacesError || tracker.defaultLocationError || "") : ""
   readonly property var placeSearchResults: tracker && Array.isArray(tracker.placeSearchResults)
     ? tracker.placeSearchResults : []
   readonly property bool placeSearchLoading: tracker && tracker.placeSearchLoading === true
@@ -74,13 +86,25 @@ Item {
     && draftPlaceSearchQuery.trim().length >= 2 && placeSearchResults.length === 0
     && String(tracker.requestedPlaceSearchQuery || "")
       === draftPlaceSearchQuery.replace(/\s+/g, " ").trim()
-  readonly property var systems: Model.orderedSystems(storms, outlooks)
-  readonly property var regionalRows: Model.regionalRows(storms, outlooks)
+  readonly property bool earthquakeMode: activeTrackerId === "earthquakes"
+  readonly property string visibleTrackerId: sidebarMode === "alerts"
+    ? "cyclones" : activeTrackerId
+  readonly property var cycloneSystems: Model.orderedSystems(storms, outlooks)
+  readonly property var earthquakeSystems: Model.orderedEarthquakes(earthquakes)
+  readonly property var systems: earthquakeMode ? earthquakeSystems : cycloneSystems
+  readonly property var earthquakeRows: {
+    clockTick
+    return Model.earthquakeRows(earthquakes, undefined, collapsedEarthquakeSections)
+  }
+  readonly property var regionalRows: earthquakeMode
+    ? earthquakeRows : Model.regionalRows(storms, outlooks)
   readonly property var watchPlaceSummaries: tracker
     && Array.isArray(tracker.watchPlaceSummaries) ? tracker.watchPlaceSummaries : []
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
   readonly property var selectedStorm: selectedSystem && selectedSystem.kind === "storm" ? selectedSystem : null
   readonly property var selectedOutlook: selectedSystem && selectedSystem.kind === "outlook" ? selectedSystem : null
+  readonly property var selectedEarthquake: selectedSystem
+    && selectedSystem.kind === "earthquake" ? selectedSystem : null
   readonly property var selectedPlace: watchPlaceById(selectedPlaceId)
   readonly property var selectedPlaceSummary: watchPlaceSummaryById(selectedPlaceId)
   readonly property string mapSelectedKey: sidebarMode === "activity" ? selectedKey
@@ -95,6 +119,19 @@ Item {
     alertUnsupportedDestinationCount + alertDataLimitedDestinationCount)
   readonly property string alertAttentionState:
     Model.watchStrongestAttentionState(watchPlaceSummaries)
+  readonly property bool modeLoading: tracker
+    ? (visibleTrackerId === "earthquakes" ? tracker.earthquakeLoading : tracker.loading) : false
+  readonly property bool modeHasLoaded: tracker
+    ? (visibleTrackerId === "earthquakes" ? tracker.earthquakeHasLoaded : tracker.hasLoaded) : false
+  readonly property bool modeStale: tracker
+    ? (visibleTrackerId === "earthquakes" ? tracker.earthquakeStale : tracker.stale) : false
+  readonly property string modeStatus: tracker
+    ? String(visibleTrackerId === "earthquakes" ? tracker.earthquakeStatus : tracker.status) : "loading"
+  readonly property string modeError: tracker
+    ? String(visibleTrackerId === "earthquakes" ? tracker.earthquakeError : tracker.error) : ""
+  readonly property string sourceUrl: visibleTrackerId === "earthquakes"
+    ? "https://earthquake.usgs.gov/earthquakes/" : "https://www.nhc.noaa.gov/"
+  readonly property string sourceLabel: visibleTrackerId === "earthquakes" ? "USGS" : "NHC"
   readonly property int dataFeedCount: 1
   readonly property var trackerDefinitions: [
     {
@@ -102,7 +139,7 @@ Item {
       name: "CYCLONES",
       title: "HURRICANE TRACKER",
       description: "Tracks, forecast cones, and formation outlooks",
-      state: String(systems.length) + " TRACKED",
+      state: String(cycloneSystems.length) + " TRACKED",
       available: true
     },
     {
@@ -110,10 +147,11 @@ Item {
       name: "EARTHQUAKES",
       title: "EARTHQUAKE TRACKER",
       description: "Recent events, shaking, depth, and impact",
-      state: "COMING NEXT",
-      available: false
+      state: root.earthquakeCount + " IN 7 DAYS",
+      available: true
     }
   ]
+  readonly property int earthquakeCount: earthquakes.length
   readonly property string activeTrackerTitle: {
     for (var i = 0; i < trackerDefinitions.length; i++)
       if (trackerDefinitions[i].id === activeTrackerId)
@@ -186,12 +224,45 @@ Item {
     )
   }
 
+  function routeActivityWheel(event, detailFirst) {
+    if (!event) return
+    if (sidebarMode !== "activity") {
+      event.accepted = false
+      return
+    }
+    if (trackerMenuOpen) {
+      event.accepted = true
+      return
+    }
+
+    var distance = Model.wheelScrollDistance(
+      event.pixelDelta ? event.pixelDelta.y : 0,
+      event.angleDelta ? event.angleDelta.y : 0,
+      Style.space(272))
+    if (!isFinite(distance) || distance === 0) {
+      event.accepted = false
+      return
+    }
+
+    var remaining = distance
+    if (detailFirst && discussionPanel.visible)
+      remaining = discussionScroll.scrollByPixels(remaining)
+    systemList.scrollByPixels(remaining)
+    event.accepted = true
+  }
+
   function systemColor(system) {
+    if (system && system.kind === "earthquake") return Model.earthquakeColor(system)
     return system && system.kind === "outlook" ? Model.outlookColor(system) : Model.severityColor(system)
   }
 
   function summaryFacts(system) {
     if (!system) return []
+    if (system.kind === "earthquake") return [
+      { label: "DEPTH", value: Model.formatDepth(system) },
+      { label: "MAX SHAKING", value: Model.formatMaximumIntensity(system) },
+      { label: "FELT REPORTS", value: Model.formatFeltReports(system) }
+    ]
     if (system.kind === "outlook") return [
       { label: "2-DAY CHANCE", value: String(system.twoDayChance || 0) + "%" },
       { label: "7-DAY CHANCE", value: String(system.sevenDayChance || 0) + "%" },
@@ -206,6 +277,12 @@ Item {
 
   function summaryContext(system) {
     if (!system) return ""
+    if (system.kind === "earthquake") {
+      var review = String(system.reviewStatus || "") === "reviewed" ? "Reviewed" : "Automatic"
+      var impact = String(system.pagerAlert || "")
+        ? " · " + Model.earthquakeImpactLabel(system) : ""
+      return review + " · USGS" + impact
+    }
     var classification = Model.systemClassificationLabel(system)
     if (system.kind === "outlook") return classification + " · NHC outlook"
     var advisory = String(system.advisoryNumber || "").replace(/^0+/, "")
@@ -215,47 +292,128 @@ Item {
   function summaryAgeLabel(system) {
     clockTick
     if (!system) return ""
-    var age = Model.humanAge(system.updatedAt)
+    var age = Model.humanAge(system.kind === "earthquake" ? system.occurredAt : system.updatedAt)
     var partial = Array.isArray(system.dataWarnings) && system.dataWarnings.length > 0
     return partial ? "Partial · " + age : age
+  }
+
+  function shouldUseDefaultLocationArrival(payload) {
+    return sidebarMode === "activity"
+      && payload.globe !== true && payload.alerts !== true
+      && !payload.stormId && !payload.outlookId && !payload.earthquakeId
+      && payload.mode !== "earthquakes"
+  }
+
+  function applyRequestedMapView(payload) {
+    var request = payload || ({})
+    if (request.globe === true || (earthquakeMode && earthquakeOverview))
+      showGlobe()
+    else if (sidebarMode === "alerts" && selectedPlace) {
+      if (editingWatchPlace) stormMap.fitWatchPlace(selectedPlace)
+      else stormMap.focusWatchPlace(selectedPlace)
+    }
+    else if (regionOverviewBasin)
+      stormMap.fitRegion(regionOverviewBasin)
+    else stormMap.fitSelected()
+  }
+
+  function cancelPendingLocationArrival() {
+    pendingLocationArrival = false
+    pendingOpeningPayload = null
+    openingLocationRetry.stop()
+    openingLocationTimeout.stop()
+  }
+
+  function tryDefaultLocationArrival() {
+    if (!opened || !pendingLocationArrival || !tracker
+        || tracker.watchPlacesLoaded !== true
+        || tracker.motionPreferenceKnown !== true
+        || tracker.defaultLocationReady !== true) return false
+    var payload = pendingOpeningPayload || ({})
+    var place = tracker.defaultWatchPlace || null
+    if (place) {
+      if (stormMap.width < 40 || stormMap.height < 40) {
+        openingLocationRetry.restart()
+        return false
+      }
+      if (stormMap.beginOpeningFlight(place, tracker.motionEnabled === true)) {
+        cancelPendingLocationArrival()
+        return true
+      }
+    }
+    cancelPendingLocationArrival()
+    applyRequestedMapView(payload)
+    return false
+  }
+
+  function beginOpeningView(payload) {
+    var request = payload || ({})
+    cancelPendingLocationArrival()
+    if (!shouldUseDefaultLocationArrival(request)) {
+      applyRequestedMapView(request)
+      return
+    }
+    regionOverviewBasin = ""
+    pendingOpeningPayload = request
+    pendingLocationArrival = true
+    stormMap.showGlobe()
+    openingLocationTimeout.restart()
+    tryDefaultLocationArrival()
   }
 
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (error) { payload = ({}) }
+    cycloneSelection = ""
+    earthquakeSelection = ""
+    selectedKey = ""
+    regionOverviewBasin = ""
+    earthquakeOverview = true
+    if (payload.stormId || payload.outlookId || payload.mode === "cyclones")
+      activeTrackerId = "cyclones"
+    else if (payload.earthquakeId || payload.mode === "earthquakes")
+      activeTrackerId = "earthquakes"
     if (payload.alerts === true) sidebarMode = "alerts"
     else if (payload.activity === true) sidebarMode = "activity"
     if (payload.stormId) {
       regionOverviewBasin = ""
       selectedKey = "storm:" + String(payload.stormId)
+      cycloneSelection = selectedKey
     }
     if (payload.outlookId) {
       regionOverviewBasin = ""
       selectedKey = "outlook:" + String(payload.outlookId)
+      cycloneSelection = selectedKey
+    }
+    if (payload.earthquakeId) {
+      regionOverviewBasin = ""
+      earthquakeOverview = false
+      selectedKey = "earthquake:" + String(payload.earthquakeId)
+      earthquakeSelection = selectedKey
+    } else if (payload.mode === "earthquakes") {
+      earthquakeOverview = true
     }
     opened = true
     syncSelection(true)
-    if (tracker && !tracker.hasLoaded && !tracker.loading) tracker.refresh()
+    if (tracker && ((!tracker.hasLoaded && !tracker.loading)
+        || (!tracker.earthquakeHasLoaded && !tracker.earthquakeLoading))) tracker.refresh()
     Qt.callLater(function() {
       keyCatcher.forceActiveFocus()
-      if (payload.globe === true) root.showGlobe()
-      else if (root.sidebarMode === "alerts" && root.selectedPlace) {
-        if (root.editingWatchPlace) stormMap.fitWatchPlace(root.selectedPlace)
-        else stormMap.focusWatchPlace(root.selectedPlace)
-      }
-      else if (root.regionOverviewBasin)
-        stormMap.fitRegion(root.regionOverviewBasin)
-      else stormMap.fitSelected()
+      root.beginOpeningView(payload)
     })
   }
 
   function close() {
     if (editingWatchPlace) cancelWatchPlaceEditor()
+    cancelPendingLocationArrival()
+    stormMap.cancelOpeningFlight()
     opened = false
   }
 
   function showGlobe(_payload) {
+    cancelPendingLocationArrival()
     regionOverviewBasin = ""
+    if (sidebarMode === "activity" && earthquakeMode) earthquakeOverview = true
     stormMap.showGlobe()
   }
 
@@ -266,6 +424,7 @@ Item {
   }
 
   function showActivity() {
+    cancelPendingLocationArrival()
     if (editingWatchPlace) cancelWatchPlaceEditor()
     trackerMenuOpen = false
     sidebarMode = "activity"
@@ -273,6 +432,7 @@ Item {
   }
 
   function showAlerts() {
+    cancelPendingLocationArrival()
     trackerMenuOpen = false
     sidebarMode = "alerts"
     keyCatcher.forceActiveFocus()
@@ -284,35 +444,52 @@ Item {
   }
 
   function toggleTrackerMenu() {
+    cancelPendingLocationArrival()
     if (sidebarMode !== "activity") sidebarMode = "activity"
     trackerMenuOpen = !trackerMenuOpen
     keyCatcher.forceActiveFocus()
   }
 
   function activateTracker(identifier) {
+    cancelPendingLocationArrival()
     var id = String(identifier || "")
     for (var i = 0; i < trackerDefinitions.length; i++) {
       var definition = trackerDefinitions[i]
       if (definition.id !== id || !definition.available) continue
+      stormMap.beginLayerSwitch()
+      if (activeTrackerId === "earthquakes") earthquakeSelection = selectedKey
+      else cycloneSelection = selectedKey
       activeTrackerId = id
+      selectedKey = id === "earthquakes" ? earthquakeSelection : cycloneSelection
+      regionOverviewBasin = ""
       sidebarMode = "activity"
       trackerMenuOpen = false
+      Qt.callLater(function() {
+        root.syncSelection(true)
+        Qt.callLater(function() { stormMap.finishLayerSwitch() })
+      })
       keyCatcher.forceActiveFocus()
       return
     }
   }
 
   function syncSelection(_forceReveal) {
-    if (regionOverviewBasin) {
+    if (!earthquakeMode && regionOverviewBasin) {
       selectedKey = ""
       fitRegionOverview(regionOverviewBasin)
       return
     }
     selectedKey = Model.selectedKeyAfterRefresh(systems, selectedKey)
+    if (earthquakeMode) earthquakeSelection = selectedKey
+    else cycloneSelection = selectedKey
     Qt.callLater(function() {
       var rowIndex = root.rowIndexForKey(root.selectedKey)
-      var sectionIndex = regionRowForIndex(rowIndex)
-      if (sectionIndex >= 0) systemList.positionViewAtIndex(sectionIndex, ListView.Beginning)
+      if (root.earthquakeMode) {
+        if (rowIndex >= 0) systemList.revealIndex(rowIndex)
+      } else {
+        var sectionIndex = regionRowForIndex(rowIndex)
+        if (sectionIndex >= 0) systemList.positionViewAtIndex(sectionIndex, ListView.Beginning)
+      }
     })
   }
 
@@ -321,6 +498,44 @@ Item {
       if (regionalRows[i].kind === "system" && regionalRows[i].key === key) return i
     }
     return -1
+  }
+
+  function earthquakeSectionIndex(sectionName) {
+    var name = String(sectionName || "")
+    for (var i = 0; i < regionalRows.length; i++) {
+      if (regionalRows[i].kind === "section-anchor"
+          && regionalRows[i].sectionName === name) return i
+    }
+    return -1
+  }
+
+  function earthquakeSectionCount(sectionName) {
+    var index = earthquakeSectionIndex(sectionName)
+    return index >= 0 ? Number(regionalRows[index].count || 0) : 0
+  }
+
+  function isEarthquakeSectionCollapsed(sectionName) {
+    return collapsedEarthquakeSections[String(sectionName || "")] === true
+  }
+
+  function setEarthquakeSectionCollapsed(sectionName, collapsed) {
+    var name = String(sectionName || "")
+    if (name === "" || isEarthquakeSectionCollapsed(name) === collapsed) return
+    var next = ({})
+    for (var key in collapsedEarthquakeSections) next[key] = collapsedEarthquakeSections[key]
+    next[name] = collapsed
+    collapsedEarthquakeSections = next
+  }
+
+  function toggleEarthquakeSection(sectionName) {
+    var name = String(sectionName || "")
+    if (name === "") return
+    setEarthquakeSectionCollapsed(name, !isEarthquakeSectionCollapsed(name))
+    Qt.callLater(function() {
+      var index = root.earthquakeSectionIndex(name)
+      if (index >= 0) systemList.positionViewAtIndex(index, ListView.Beginning)
+    })
+    keyCatcher.forceActiveFocus()
   }
 
   function regionRowForIndex(index) {
@@ -349,7 +564,8 @@ Item {
   }
 
   function viewRegion(basin) {
-    if (!basin) return
+    if (!basin || earthquakeMode) return
+    cancelPendingLocationArrival()
     regionOverviewBasin = basin
     selectedKey = ""
     fitRegionOverview(basin)
@@ -359,14 +575,23 @@ Item {
   function selectSystem(key) {
     var system = Model.systemByKey(systems, key)
     if (!system) return
+    cancelPendingLocationArrival()
     sidebarMode = "activity"
     trackerMenuOpen = false
     selectedPlaceId = ""
     regionOverviewBasin = ""
     selectedKey = key
+    if (system.kind === "earthquake") {
+      earthquakeOverview = false
+      earthquakeSelection = key
+      setEarthquakeSectionCollapsed(Model.earthquakeSectionName(system), false)
+    } else {
+      cycloneSelection = key
+    }
     Qt.callLater(function() {
       var rowIndex = root.rowIndexForKey(key)
-      if (rowIndex >= 0) systemList.positionViewAtIndex(rowIndex, ListView.Contain)
+      if (rowIndex >= 0) systemList.revealIndex(rowIndex)
+      stormMap.fitSelected()
     })
     keyCatcher.forceActiveFocus()
   }
@@ -381,6 +606,15 @@ Item {
     for (var i = 0; i < systems.length; i++) if (systems[i].key === selectedKey) current = i
     var next = (current + delta + systems.length) % systems.length
     selectSystem(systems[next].key)
+  }
+
+  function selectMapSystem(key) {
+    if (sidebarMode === "alerts" && activeTrackerId !== "cyclones") {
+      activateTracker("cyclones")
+      Qt.callLater(function() { root.selectSystem(key) })
+      return
+    }
+    selectSystem(key)
   }
 
   function watchPlaceById(identifier) {
@@ -402,6 +636,7 @@ Item {
   function selectWatchPlace(identifier) {
     var place = watchPlaceById(identifier)
     if (!place) return
+    cancelPendingLocationArrival()
     sidebarMode = "alerts"
     trackerMenuOpen = false
     selectedPlaceId = place.id
@@ -420,6 +655,7 @@ Item {
 
   function beginAddWatchPlace() {
     if (!tracker || !tracker.watchPlacesLoaded || watchPlaces.length >= 12) return
+    cancelPendingLocationArrival()
     sidebarMode = "alerts"
     trackerMenuOpen = false
     editingWatchPlace = true
@@ -437,6 +673,7 @@ Item {
   function beginEditWatchPlace(identifier) {
     var place = watchPlaceById(identifier)
     if (!place) return
+    cancelPendingLocationArrival()
     sidebarMode = "alerts"
     trackerMenuOpen = false
     editingWatchPlace = true
@@ -694,7 +931,11 @@ Item {
   }
 
   function refresh() {
-    if (tracker && tracker.refresh) tracker.refresh()
+    if (!tracker) return
+    if (visibleTrackerId === "earthquakes" && tracker.refreshEarthquakes)
+      tracker.refreshEarthquakes()
+    else if (visibleTrackerId === "cyclones" && tracker.refreshTropical)
+      tracker.refreshTropical()
   }
 
   function officialUrl(storm, field) {
@@ -712,6 +953,13 @@ Item {
     openBrowser(officialUrl(storm, field))
   }
 
+  function primaryOfficialField(system) {
+    if (!system) return ""
+    if (system.kind === "earthquake") return "officialUrl"
+    if (system.kind === "outlook") return "discussionUrl"
+    return "advisoryUrl"
+  }
+
   function handleHyprlandEvent(event) {
     if (!opened || String(event && event.name || "") !== "openwindow") return
     var parts = []
@@ -725,10 +973,14 @@ Item {
     ignoreUnknownSignals: true
     function onStormsChanged() { root.syncSelection(false) }
     function onOutlooksChanged() { root.syncSelection(false) }
+    function onEarthquakesChanged() { root.syncSelection(false) }
     function onWatchPlacesChanged() {
       if (root.selectedPlaceId && !root.watchPlaceById(root.selectedPlaceId))
         root.selectedPlaceId = ""
+      root.tryDefaultLocationArrival()
     }
+    function onDefaultLocationReadyChanged() { root.tryDefaultLocationArrival() }
+    function onMotionPreferenceKnownChanged() { root.tryDefaultLocationArrival() }
     function onReverseGeocodeResultChanged() {
       Qt.callLater(function() {
         if (root.tracker)
@@ -772,6 +1024,29 @@ Item {
       if (root.tracker && root.tracker.searchPlaces
           && root.draftPlaceSearchQuery.trim().length >= 2)
         root.tracker.searchPlaces(root.draftPlaceSearchQuery)
+    }
+  }
+
+  Timer {
+    id: openingLocationRetry
+    interval: 32
+    repeat: false
+    onTriggered: root.tryDefaultLocationArrival()
+  }
+
+  Timer {
+    id: openingLocationTimeout
+    interval: 6500
+    repeat: false
+    onTriggered: {
+      if (!root.pendingLocationArrival) return
+      if (root.defaultLocationLoading) {
+        openingLocationTimeout.restart()
+        return
+      }
+      var payload = root.pendingOpeningPayload || ({})
+      root.cancelPendingLocationArrival()
+      root.applyRequestedMapView(payload)
     }
   }
 
@@ -826,6 +1101,18 @@ Item {
           } else if (event.key === Qt.Key_Down) {
             root.moveSelection(1)
             event.accepted = true
+          } else if (event.key === Qt.Key_PageUp && root.sidebarMode === "activity") {
+            systemList.scrollByPixels(-systemList.height * 0.84)
+            event.accepted = true
+          } else if (event.key === Qt.Key_PageDown && root.sidebarMode === "activity") {
+            systemList.scrollByPixels(systemList.height * 0.84)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Home && root.sidebarMode === "activity") {
+            systemList.scrollToEdge(false)
+            event.accepted = true
+          } else if (event.key === Qt.Key_End && root.sidebarMode === "activity") {
+            systemList.scrollToEdge(true)
+            event.accepted = true
           } else if (event.key === Qt.Key_R) {
             root.refresh()
             event.accepted = true
@@ -846,8 +1133,9 @@ Item {
           } else if (event.key === Qt.Key_0 || event.key === Qt.Key_G) {
             root.showGlobe()
             event.accepted = true
-          } else if (event.key === Qt.Key_O && root.selectedStorm) {
-            root.openOfficial(root.selectedStorm, "advisoryUrl")
+          } else if (event.key === Qt.Key_O && root.selectedSystem) {
+            root.openOfficial(root.selectedSystem,
+              root.primaryOfficialField(root.selectedSystem))
             event.accepted = true
           }
         }
@@ -1011,13 +1299,18 @@ Item {
           anchors.fill: parent
           storms: root.storms
           outlooks: root.outlooks
+          earthquakes: root.earthquakes
           watchPlaces: root.watchPlaces
+          mode: root.sidebarMode === "alerts" ? "cyclones" : root.activeTrackerId
           selectedKey: root.mapSelectedKey
           autoFitSelection: root.sidebarMode === "activity"
+          preferOverview: root.sidebarMode === "activity"
+            && root.earthquakeMode && root.earthquakeOverview
           selectedPlaceId: root.selectedPlaceId
           placementMode: root.sidebarMode === "alerts" && root.editingWatchPlace
           draftWatchPlace: root.draftWatchPlace
           useImperial: root.useImperial
+          motionEnabled: root.tracker && root.tracker.motionEnabled === true
           bottomInset: root.sidebarMode === "activity" && root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean
@@ -1031,12 +1324,15 @@ Item {
           surfaceColor: root.background
           surfaceBorderColor: root.border
           fontFamily: Style.font.menuFamily
-          onSystemActivated: function(key) { root.selectSystem(key) }
+          onSystemActivated: function(key) { root.selectMapSystem(key) }
           onPlaceActivated: function(identifier) { root.selectWatchPlace(identifier) }
           onPlacePicked: function(latitude, longitude) {
             root.setDraftWatchCoordinate(latitude, longitude)
           }
-          onPointerActivity: keyCatcher.forceActiveFocus()
+          onPointerActivity: {
+            root.cancelPendingLocationArrival()
+            keyCatcher.forceActiveFocus()
+          }
         }
 
         BorderSurface {
@@ -1127,7 +1423,9 @@ Item {
                 anchors.centerIn: parent
                 text: root.selectedSystem
                   ? (root.selectedSystem.kind === "storm" ? Model.severityCode(root.selectedSystem)
-                    : String(root.selectedSystem.sevenDayChance || 0) + "%")
+                    : (root.selectedSystem.kind === "earthquake"
+                      ? Model.earthquakeMagnitudeLabel(root.selectedSystem)
+                      : String(root.selectedSystem.sevenDayChance || 0) + "%"))
                   : ""
                 textFormat: Text.PlainText
                 color: root.selectedSystem ? root.systemColor(root.selectedSystem) : root.foreground
@@ -1148,7 +1446,8 @@ Item {
               Text {
                 width: parent.width
                 text: root.selectedSystem
-                  ? String(root.selectedSystem.name || root.selectedSystem.title || "Tropical system") : ""
+                  ? String(root.selectedSystem.name || root.selectedSystem.title
+                    || (root.selectedEarthquake ? "Earthquake" : "Tropical system")) : ""
                 textFormat: Text.PlainText
                 color: root.foreground
                 elide: Text.ElideRight
@@ -1259,7 +1558,7 @@ Item {
 
         Rectangle {
           id: errorBanner
-          visible: root.tracker && root.tracker.error !== ""
+          visible: root.tracker && root.modeError !== ""
           anchors.left: parent.left
           anchors.leftMargin: Style.spacing.lg
           anchors.right: parent.right
@@ -1279,7 +1578,7 @@ Item {
             anchors.right: retryButton.left
             anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: parent.verticalCenter
-            text: root.tracker ? root.tracker.error : ""
+            text: root.modeError
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: root.mapText
@@ -1304,7 +1603,7 @@ Item {
 
         Column {
           visible: root.sidebarMode === "activity" && root.systems.length === 0
-            && (!root.tracker || (!root.tracker.loading && root.tracker.hasLoaded))
+            && (!root.tracker || (!root.modeLoading && root.modeHasLoaded))
           anchors.centerIn: parent
           width: Math.min(Style.space(430), parent.width - Style.spacing.xl * 2)
           spacing: Style.spacing.sm
@@ -1312,14 +1611,15 @@ Item {
 
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "\uf751"
+            text: root.earthquakeMode ? "\uf0ac" : "\uf751"
             color: root.mapMuted
             font.family: Style.font.family
             font.pixelSize: Style.space(38)
           }
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "No NHC tropical systems"
+            text: root.earthquakeMode ? "No recent M4.5+ earthquakes"
+              : "No NHC tropical systems"
             color: root.mapText
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.heading
@@ -1329,7 +1629,9 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: "The Atlantic, Eastern Pacific, and Central Pacific basins have no active cyclones or outlook areas. Hurricane Tracker will keep checking."
+            text: root.earthquakeMode
+              ? "USGS has no magnitude 4.5 or greater earthquakes in the current seven-day feed. The tracker will keep checking."
+              : "The Atlantic, Eastern Pacific, and Central Pacific basins have no active cyclones or outlook areas. The tracker will keep checking."
             color: root.mapMuted
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.body
@@ -1337,7 +1639,8 @@ Item {
         }
 
         Column {
-          visible: root.tracker && root.tracker.loading && !root.tracker.hasLoaded
+          visible: root.sidebarMode === "activity" && root.tracker
+            && root.modeLoading && !root.modeHasLoaded
           anchors.centerIn: parent
           width: Style.space(310)
           spacing: Style.spacing.sm
@@ -1355,7 +1658,8 @@ Item {
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             topPadding: Style.spacing.md
-            text: "Checking the National Hurricane Center"
+            text: root.earthquakeMode ? "Checking the USGS earthquake feed"
+              : "Checking the National Hurricane Center"
             color: root.mapMuted
             font.family: Style.font.menuFamily
             font.pixelSize: Style.font.body
@@ -1385,19 +1689,23 @@ Item {
               spacing: Style.spacing.xs
               Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 16
-                height: 8
-                radius: 2
-                color: root.selectedOutlook
+                width: root.selectedEarthquake ? 10 : 16
+                height: root.selectedEarthquake ? 10 : 8
+                radius: root.selectedEarthquake ? width / 2 : 2
+                color: root.selectedEarthquake
+                  ? root.systemColor(root.selectedEarthquake)
+                  : (root.selectedOutlook
                   ? Qt.rgba(Qt.color(root.systemColor(root.selectedOutlook)).r,
                     Qt.color(root.systemColor(root.selectedOutlook)).g,
                     Qt.color(root.systemColor(root.selectedOutlook)).b, 0.24)
-                  : Qt.rgba(root.mapCone.r, root.mapCone.g, root.mapCone.b, 0.32)
+                  : Qt.rgba(root.mapCone.r, root.mapCone.g, root.mapCone.b, 0.32))
                 border.width: 1
-                border.color: root.selectedOutlook ? root.systemColor(root.selectedOutlook) : root.mapCone
+                border.color: root.selectedEarthquake ? root.mapTrack
+                  : (root.selectedOutlook ? root.systemColor(root.selectedOutlook) : root.mapCone)
               }
               Text {
-                text: root.selectedOutlook ? "Formation area" : "Forecast cone"
+                text: root.selectedEarthquake ? "Size: magnitude · color: PAGER impact"
+                  : (root.selectedOutlook ? "Formation area" : "Forecast cone")
                 color: root.mapMuted
                 font.family: Style.font.menuFamily
                 font.pixelSize: root.typeCaption
@@ -1627,14 +1935,23 @@ Item {
               spacing: Style.spacing.sm
 
               HurricaneIcon {
+                visible: root.activeTrackerId === "cyclones"
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(16)
                 height: width
                 iconColor: root.accent
               }
               Text {
+                visible: root.activeTrackerId === "earthquakes"
                 anchors.verticalCenter: parent.verticalCenter
-                text: "CYCLONES"
+                text: "\uf0ac"
+                color: root.accent
+                font.family: Style.font.family
+                font.pixelSize: Style.space(16)
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.activeTrackerId === "earthquakes" ? "EARTHQUAKES" : "CYCLONES"
                 color: root.trackerMenuOpen
                   ? Style.selectedStateColor(root.foreground, root.accent) : root.foreground
                 font.family: Style.font.menuFamily
@@ -1670,7 +1987,8 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
-            text: String(root.systems.length) + " TRACKED"
+            text: root.earthquakeMode ? String(root.earthquakeCount) + " IN 7 DAYS"
+              : String(root.systems.length) + " TRACKED"
             color: root.dim
             font.family: Style.font.menuFamily
             font.pixelSize: root.typeMicro
@@ -1684,6 +2002,13 @@ Item {
             anchors.bottom: parent.bottom
             height: 1
             color: root.border
+          }
+
+          WheelHandler {
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            orientation: Qt.Vertical
+            onWheel: function(event) { root.routeActivityWheel(event, false) }
           }
         }
 
@@ -1908,15 +2233,142 @@ Item {
           model: root.regionalRows
           currentIndex: -1
 
+          function maximumContentY() {
+            return Math.max(originY, originY + contentHeight - height)
+          }
+
+          function scrollByPixels(distance) {
+            var requested = Number(distance)
+            if (!isFinite(requested) || requested === 0) return 0
+            var before = contentY
+            cancelFlick()
+            contentY = Math.max(originY, Math.min(maximumContentY(), before + requested))
+            return requested - (contentY - before)
+          }
+
+          function scrollToEdge(end) {
+            cancelFlick()
+            contentY = end ? maximumContentY() : originY
+          }
+
+          function revealIndex(index) {
+            positionViewAtIndex(index, ListView.Contain)
+            Qt.callLater(function() {
+              var item = systemList.itemAtIndex(index)
+              if (!item) return
+              var headerInset = root.earthquakeMode ? Style.space(44) : 0
+              var visibleTop = systemList.contentY + headerInset
+              if (item.y < visibleTop) systemList.scrollByPixels(item.y - visibleTop)
+            })
+          }
+
+          section.property: root.earthquakeMode ? "sectionName" : ""
+          section.criteria: ViewSection.FullString
+          section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
+          section.delegate: Rectangle {
+            id: earthquakeSectionHeader
+            required property string section
+
+            readonly property bool collapsed: root.isEarthquakeSectionCollapsed(section)
+            readonly property bool activeSection: root.earthquakeMode && section !== ""
+            width: ListView.view.width
+            height: activeSection ? Style.space(44) : 0
+            opacity: activeSection ? 1 : 0
+            clip: true
+            color: !activeSection ? "transparent" : (sectionMouse.containsMouse
+              ? Style.hoverFillFor(root.foreground, root.accent) : root.shellSurface)
+            z: activeSection ? 3 : -1
+
+            Behavior on color { ColorAnimation { duration: 120 } }
+
+            Rectangle {
+              visible: earthquakeSectionHeader.activeSection
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              height: 1
+              color: root.border
+              opacity: 0.72
+            }
+
+            Text {
+              visible: earthquakeSectionHeader.activeSection
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(13)
+              anchors.verticalCenter: parent.verticalCenter
+              text: earthquakeSectionHeader.section.toUpperCase()
+              textFormat: Text.PlainText
+              color: root.foreground
+              font.family: Style.font.menuFamily
+              font.pixelSize: root.typeCaption
+              font.bold: true
+              font.letterSpacing: 0.7
+            }
+
+            Text {
+              visible: earthquakeSectionHeader.activeSection
+              anchors.right: sectionChevron.left
+              anchors.rightMargin: Style.spacing.md
+              anchors.verticalCenter: parent.verticalCenter
+              text: String(root.earthquakeSectionCount(earthquakeSectionHeader.section))
+              color: root.dim
+              font.family: Style.font.menuFamily
+              font.pixelSize: root.typeCaption
+            }
+
+            Text {
+              id: sectionChevron
+              visible: earthquakeSectionHeader.activeSection
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(13)
+              anchors.verticalCenter: parent.verticalCenter
+              text: earthquakeSectionHeader.collapsed ? "\uf054" : "\uf078"
+              color: earthquakeSectionHeader.collapsed ? root.dim : root.foreground
+              font.family: Style.font.family
+              font.pixelSize: root.typeCaption
+            }
+
+            MouseArea {
+              id: sectionMouse
+              anchors.fill: parent
+              enabled: earthquakeSectionHeader.activeSection
+              hoverEnabled: true
+              activeFocusOnTab: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.toggleEarthquakeSection(earthquakeSectionHeader.section)
+              Keys.onPressed: function(event) {
+                if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter
+                    && event.key !== Qt.Key_Space) return
+                root.toggleEarthquakeSection(earthquakeSectionHeader.section)
+                event.accepted = true
+              }
+            }
+
+            Rectangle {
+              visible: earthquakeSectionHeader.activeSection
+              anchors.fill: parent
+              color: "transparent"
+              border.width: sectionMouse.activeFocus ? 1 : 0
+              border.color: root.accent
+            }
+
+            Accessible.name: earthquakeSectionHeader.section + ", "
+              + root.earthquakeSectionCount(earthquakeSectionHeader.section) + " events, "
+              + (earthquakeSectionHeader.collapsed ? "collapsed" : "expanded")
+            Accessible.role: Accessible.Button
+          }
+
           delegate: Rectangle {
             id: systemRow
             property var rowData: modelData
             property var system: rowData.kind === "system" ? rowData.system : null
             property bool isSelected: system && system.key === root.selectedKey
+            property bool isSectionAnchor: rowData.kind === "section-anchor"
             readonly property color itemColor: system ? root.systemColor(system) : root.dim
             width: systemList.width
-            height: rowData.kind === "region" ? Style.space(48)
-              : (rowData.kind === "empty" ? Style.space(34) : Style.space(82))
+            height: isSectionAnchor ? 0 : (rowData.kind === "region" ? Style.space(48)
+              : (rowData.kind === "empty" ? Style.space(34) : Style.space(82)))
+            visible: !isSectionAnchor
             color: isSelected ? root.raisedSurface
               : (system && rowMouse.containsMouse
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
@@ -1928,6 +2380,7 @@ Item {
               anchors.right: parent.right
               anchors.bottom: parent.bottom
               height: 1
+              visible: !systemRow.isSectionAnchor
               color: rowData.kind === "region" ? root.border : root.softBorder
             }
 
@@ -1994,7 +2447,7 @@ Item {
               anchors.left: parent.left
               anchors.leftMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
-              text: "No current systems"
+              text: root.earthquakeMode ? "No events in this feed" : "No current systems"
               color: root.dim
               font.family: Style.font.menuFamily
               font.pixelSize: root.typeCaption
@@ -2006,7 +2459,7 @@ Item {
               anchors.left: parent.left
               anchors.leftMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(46)
+              width: system && system.kind === "earthquake" ? Style.space(50) : Style.space(46)
               height: Style.space(40)
               radius: Style.space(9)
               color: Qt.rgba(Qt.color(itemColor).r, Qt.color(itemColor).g,
@@ -2016,8 +2469,10 @@ Item {
 
               Text {
                 anchors.centerIn: parent
-                text: system ? (system.kind === "storm" ? Model.severityCode(system)
-                  : String(system.sevenDayChance || 0) + "%") : ""
+                text: system ? (system.kind === "earthquake"
+                  ? Model.earthquakeMagnitudeLabel(system)
+                  : (system.kind === "storm" ? Model.severityCode(system)
+                    : String(system.sevenDayChance || 0) + "%")) : ""
                 color: itemColor
                 font.family: Style.font.menuFamily
                 font.pixelSize: root.typeCaption
@@ -2036,7 +2491,8 @@ Item {
 
               Text {
                 width: parent.width
-                text: system ? String(system.name || system.title || "Tropical system") : ""
+                text: system ? String(system.name || system.title
+                  || (system.kind === "earthquake" ? "Earthquake" : "Tropical system")) : ""
                 textFormat: Text.PlainText
                 color: root.foreground
                 elide: Text.ElideRight
@@ -2046,8 +2502,9 @@ Item {
               }
               Text {
                 width: parent.width
-                text: system ? Model.systemClassificationLabel(system) + " · "
-                  + Model.systemMetric(system, root.useImperial) : ""
+                text: system ? (system.kind === "earthquake" && String(system.pagerAlert || "")
+                  ? Model.earthquakeImpactLabel(system) : Model.systemClassificationLabel(system))
+                  + " · " + Model.systemMetric(system, root.useImperial) : ""
                 textFormat: Text.PlainText
                 color: root.dim
                 elide: Text.ElideRight
@@ -2069,13 +2526,24 @@ Item {
             }
 
             Accessible.name: rowData.kind === "region" ? String(rowData.name || "Region") + " region"
-              : (system ? String(system.name || "Tropical system") + ", "
+              : (system ? String(system.name || (system.kind === "earthquake"
+                ? "Earthquake" : "Tropical system")) + ", "
                 + Model.systemClassificationLabel(system) + ", "
                 + Model.systemMetric(system, root.useImperial) : "No current systems")
             Accessible.role: rowData.kind === "region" ? Accessible.StaticText : Accessible.ListItem
           }
 
+          WheelHandler {
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            orientation: Qt.Vertical
+            onWheel: function(event) { root.routeActivityWheel(event, false) }
+          }
+
           QQC.ScrollBar.vertical: QQC.ScrollBar {
+            interactive: true
+            minimumSize: Math.min(1, Style.space(44) / Math.max(1, systemList.height))
+            active: hovered || pressed || systemList.moving
             policy: systemList.contentHeight > systemList.height
               ? QQC.ScrollBar.AsNeeded : QQC.ScrollBar.AlwaysOff
           }
@@ -2816,7 +3284,8 @@ Item {
                 anchors.rightMargin: Style.space(13)
                 anchors.top: parent.top
                 anchors.topMargin: Style.space(13)
-                text: root.alertDestinationCount === 0 ? "NO LOCATIONS WATCHED"
+                text: root.alertDestinationCount === 0
+                  ? (root.defaultLocationLoading ? "LOCATING DEFAULT ALERT" : "NO LOCATIONS WATCHED")
                   : (root.alertUpdateCount > 0
                     ? String(root.alertUpdateCount) + (root.alertUpdateCount === 1
                       ? " LOCATION NEEDS ATTENTION" : " LOCATIONS NEED ATTENTION")
@@ -2841,7 +3310,9 @@ Item {
                 anchors.top: alertsSummaryTitle.bottom
                 anchors.topMargin: Style.space(6)
                 text: root.alertDestinationCount === 0
-                  ? "Save a location for calm heads-ups from official formation areas and forecast paths. Alert perimeters appear only while editing."
+                  ? (root.defaultLocationLoading
+                    ? "Using your Omarchy weather location to create a removable default alert."
+                    : "Save a location for calm heads-ups from official formation areas and forecast paths. Alert perimeters appear only while editing.")
                   : (root.alertUpdateCount === 0 && root.alertLimitedDestinationCount > 0
                     ? "Some official source or forecast data is unavailable. Review each location below for coverage."
                     : "Official formation areas and forecast paths are monitored for each location. Alert perimeters appear only while editing.")
@@ -2863,7 +3334,7 @@ Item {
 
             Text {
               id: watchSaveError
-              visible: root.tracker && root.tracker.watchPlacesError !== ""
+              visible: root.watchLocationError !== ""
               anchors.left: parent.left
               anchors.leftMargin: Style.spacing.lg
               anchors.right: parent.right
@@ -2871,7 +3342,7 @@ Item {
               anchors.top: alertsSummary.bottom
               anchors.topMargin: Style.spacing.md
               height: visible ? implicitHeight : 0
-              text: root.tracker ? root.tracker.watchPlacesError : ""
+              text: root.watchLocationError
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               color: "#e9be62"
@@ -2987,6 +3458,7 @@ Item {
                   anchors.top: placeName.bottom
                   anchors.topMargin: Style.space(4)
                   text: root.watchPlaceCoordinateLabel(place)
+                    + (place && place.id === "user-location" ? " · DEFAULT" : "")
                   textFormat: Text.PlainText
                   color: root.dim
                   elide: Text.ElideRight
@@ -3163,7 +3635,8 @@ Item {
                 }
                 Text {
                   anchors.horizontalCenter: parent.horizontalCenter
-                  text: "No alert destinations yet"
+                  text: root.defaultLocationLoading
+                    ? "Finding your location" : "No alert destinations yet"
                   color: root.foreground
                   font.family: Style.font.menuFamily
                   font.pixelSize: Style.font.title
@@ -3172,7 +3645,9 @@ Item {
                 Text {
                   width: parent.width
                   horizontalAlignment: Text.AlignHCenter
-                  text: "Save home, family, or a destination. Alert locations remain on this computer."
+                  text: root.defaultLocationLoading
+                    ? "The whole globe stays available while the tracker checks your Omarchy weather location."
+                    : "Save home, family, or a destination. Alert locations remain on this computer."
                   textFormat: Text.PlainText
                   wrapMode: Text.WordWrap
                   color: root.dim
@@ -3225,17 +3700,19 @@ Item {
               width: 5
               height: 5
               radius: 3
-              color: !root.tracker || root.tracker.loading ? root.dim
-                : (root.tracker.stale ? "#e9be62"
-                  : (root.tracker.status !== "fresh" ? root.urgent
-                    : (!root.tracker.outlookDataComplete ? "#e9be62" : "#45c6b5")))
+              color: !root.tracker || root.modeLoading ? root.dim
+                : (root.modeStale ? "#e9be62"
+                  : (root.modeStatus !== "fresh" ? root.urgent
+                    : (root.visibleTrackerId === "cyclones"
+                      && !root.tracker.outlookDataComplete ? "#e9be62" : "#45c6b5")))
             }
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: !root.tracker || (!root.tracker.hasLoaded && root.tracker.loading)
-                ? "CHECKING DATA" : (root.tracker.stale ? "SAVED DATA"
-                  : (root.tracker.status !== "fresh" ? "DATA ISSUE"
-                    : (!root.tracker.outlookDataComplete ? "DATA PARTIAL" : "DATA LIVE")))
+              text: !root.tracker || (!root.modeHasLoaded && root.modeLoading)
+                ? "CHECKING DATA" : (root.modeStale ? "SAVED DATA"
+                  : (root.modeStatus !== "fresh" ? "DATA ISSUE"
+                    : (root.visibleTrackerId === "cyclones"
+                      && !root.tracker.outlookDataComplete ? "DATA PARTIAL" : "DATA LIVE")))
               textFormat: Text.PlainText
               color: root.dim
               font.family: Style.font.menuFamily
@@ -3264,7 +3741,7 @@ Item {
               width: root.minimumTouchTarget
               height: root.minimumTouchTarget
               iconText: "\uf021"
-              iconSpinning: root.tracker ? root.tracker.loading : false
+              iconSpinning: root.modeLoading
               tooltipText: "Refresh data (R)"
               focusable: true
               foreground: root.dim
@@ -3278,15 +3755,23 @@ Item {
               width: root.minimumTouchTarget
               height: root.minimumTouchTarget
               iconText: "\uf35d"
-              tooltipText: "View source: National Hurricane Center"
+              tooltipText: "View source: " + (root.sourceLabel === "USGS"
+                ? "USGS Earthquake Hazards Program" : "National Hurricane Center")
               focusable: true
               foreground: root.dim
               accent: root.accent
               iconSize: root.typeCaption
               horizontalPadding: 0
               verticalPadding: 0
-              onClicked: root.openBrowser("https://www.nhc.noaa.gov/")
+              onClicked: root.openBrowser(root.sourceUrl)
             }
+          }
+
+          WheelHandler {
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            orientation: Qt.Vertical
+            onWheel: function(event) { root.routeActivityWheel(event, false) }
           }
         }
 
@@ -3320,7 +3805,8 @@ Item {
             anchors.rightMargin: Style.space(12)
             anchors.top: parent.top
             anchors.topMargin: Style.space(10)
-            text: root.selectedOutlook ? "TROPICAL WEATHER OUTLOOK" : "FORECAST DISCUSSION"
+            text: root.selectedEarthquake ? "EVENT DETAILS"
+              : (root.selectedOutlook ? "TROPICAL WEATHER OUTLOOK" : "FORECAST DISCUSSION")
             color: root.dim
             elide: Text.ElideRight
             font.family: Style.font.menuFamily
@@ -3345,6 +3831,19 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             interactive: contentHeight > height
             clip: true
+
+            function maximumContentY() {
+              return Math.max(originY, originY + contentHeight - height)
+            }
+
+            function scrollByPixels(distance) {
+              var requested = Number(distance)
+              if (!isFinite(requested) || requested === 0) return 0
+              var before = contentY
+              cancelFlick()
+              contentY = Math.max(originY, Math.min(maximumContentY(), before + requested))
+              return requested - (contentY - before)
+            }
 
             Text {
               id: discussionText
@@ -3390,7 +3889,8 @@ Item {
               onClicked: root.openOfficial(root.selectedStorm, "advisoryUrl")
             }
             Button {
-              text: root.selectedOutlook ? "Full outlook" : "Full discussion"
+              text: root.selectedEarthquake ? "USGS event"
+                : (root.selectedOutlook ? "Full outlook" : "Full discussion")
               iconText: "\uf35d"
               height: root.minimumTouchTarget
               radius: root.minimumTouchTarget / 2
@@ -3402,8 +3902,10 @@ Item {
               iconSize: root.typeMicro
               horizontalPadding: Style.space(10)
               verticalPadding: 0
-              enabled: root.officialUrl(root.selectedSystem, "discussionUrl") !== ""
-              onClicked: root.openOfficial(root.selectedSystem, "discussionUrl")
+              enabled: root.officialUrl(root.selectedSystem,
+                root.selectedEarthquake ? "officialUrl" : "discussionUrl") !== ""
+              onClicked: root.openOfficial(root.selectedSystem,
+                root.selectedEarthquake ? "officialUrl" : "discussionUrl")
             }
           }
 
@@ -3415,12 +3917,21 @@ Item {
             anchors.rightMargin: Style.space(12)
             anchors.bottom: parent.bottom
             anchors.bottomMargin: Style.space(10)
-            text: "Awareness only. Follow local alerts."
+            text: root.selectedEarthquake
+              ? "Recent event data can change. Follow local authorities."
+              : "Awareness only. Follow local alerts."
             textFormat: Text.PlainText
             color: root.dim
             elide: Text.ElideRight
             font.family: Style.font.menuFamily
             font.pixelSize: root.typeCaption
+          }
+
+          WheelHandler {
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            orientation: Qt.Vertical
+            onWheel: function(event) { root.routeActivityWheel(event, true) }
           }
         }
       }

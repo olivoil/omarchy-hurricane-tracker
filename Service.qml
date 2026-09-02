@@ -11,6 +11,7 @@ Item {
   property var shell: null
   property var manifest: null
   property var settings: ({})
+  property bool settingsReady: false
 
   // Omarchy does not currently have a manifest field for launcher entries, so
   // the service installs one while the plugin is enabled. A pre-existing file
@@ -53,18 +54,48 @@ Item {
     outlooks: [],
     regions: []
   })
+  property var earthquakePayload: ({
+    schemaVersion: 1,
+    status: "loading",
+    stale: false,
+    fetchedAt: "",
+    checkedAt: "",
+    source: ({
+      name: "USGS Earthquake Hazards Program",
+      url: "https://earthquake.usgs.gov/earthquakes/",
+      coverage: "Worldwide magnitude 4.5+ earthquakes from the past seven days"
+    }),
+    error: "",
+    events: []
+  })
   property var storms: []
   property var outlooks: []
   property var regions: []
+  property var earthquakes: []
   property var watchPlaces: []
   property bool watchPlacesLoaded: false
   property string watchPlacesError: ""
+  property bool defaultLocationInitialized: false
+  property bool defaultLocationAttempted: false
+  property bool defaultLocationLoading: false
+  property string defaultLocationError: ""
+  property string defaultLocationProcessOutput: ""
+  property string defaultLocationProcessError: ""
+  property bool motionEnabled: false
+  property bool motionPreferenceKnown: false
+  property string motionPreferenceOutput: ""
   property bool loading: false
   property bool hasLoaded: false
   property bool pendingRefresh: false
   property int consecutiveFailures: 0
   property string processOutput: ""
   property string processError: ""
+  property bool earthquakeLoading: false
+  property bool earthquakeHasLoaded: false
+  property bool earthquakePendingRefresh: false
+  property int earthquakeConsecutiveFailures: 0
+  property string earthquakeProcessOutput: ""
+  property string earthquakeProcessError: ""
   property var alertBaseline: ({})
   property bool alertsArmed: false
   property string appliedAlertConfig: ""
@@ -106,15 +137,37 @@ Item {
   readonly property int activeCount: Array.isArray(storms) ? storms.length : 0
   readonly property int outlookCount: Array.isArray(outlooks) ? outlooks.length : 0
   readonly property int trackingCount: activeCount + outlookCount
+  readonly property string earthquakeStatus:
+    String(earthquakePayload && earthquakePayload.status || "loading")
+  readonly property bool earthquakeStale:
+    earthquakePayload && earthquakePayload.stale === true
+  readonly property string earthquakeError:
+    String(earthquakePayload && earthquakePayload.error || "")
+  readonly property string earthquakeFetchedAt:
+    String(earthquakePayload && earthquakePayload.fetchedAt || "")
+  readonly property int earthquakeCount:
+    Array.isArray(earthquakes) ? earthquakes.length : 0
   readonly property var incompleteOutlookBasins: payload
     && Array.isArray(payload.incompleteOutlookBasins) ? payload.incompleteOutlookBasins : []
   readonly property bool outlookDataComplete: incompleteOutlookBasins.length === 0
   readonly property var incompleteForecastSystemKeys:
     Model.incompleteForecastSystemKeys(storms)
   readonly property int watchPlaceCount: Array.isArray(watchPlaces) ? watchPlaces.length : 0
+  readonly property string defaultWatchPlaceId: "user-location"
+  readonly property var defaultWatchPlace: {
+    for (var i = 0; i < watchPlaces.length; i++)
+      if (watchPlaces[i] && watchPlaces[i].id === defaultWatchPlaceId)
+        return watchPlaces[i]
+    return null
+  }
+  readonly property bool defaultLocationReady: watchPlacesLoaded
+    && (defaultLocationInitialized || defaultLocationAttempted)
   readonly property int refreshMinutes: Math.max(5, Math.min(60, Number(setting("refreshMinutes", 15)) || 15))
   readonly property int retryMultiplier: Math.min(4, Math.pow(2, Math.min(consecutiveFailures, 2)))
-  readonly property bool settingsReady: settings && Object.keys(settings).length > 0
+  readonly property int earthquakeRefreshMinutes: Math.max(5,
+    Math.min(60, Number(setting("earthquakeRefreshMinutes", 5)) || 5))
+  readonly property int earthquakeRetryMultiplier: Math.min(4,
+    Math.pow(2, Math.min(earthquakeConsecutiveFailures, 2)))
   readonly property string alertRegion: settingsReady ? String(setting("alertRegion", "Off")) : "Off"
   readonly property string formationThreshold: String(setting("formationThreshold", "Medium (40%)"))
   readonly property bool notifyNamedStorms: setting("notifyNamedStorms", true) === true
@@ -165,12 +218,22 @@ Item {
     reconcileLauncherEntry("remove")
   }
 
+  function applySettings(value) {
+    settings = value && typeof value === "object" ? value : ({})
+    settingsReady = true
+  }
+
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
     return value === undefined || value === null ? fallback : value
   }
 
   function refresh() {
+    refreshTropical()
+    refreshEarthquakes()
+  }
+
+  function refreshTropical() {
     if (fetchProcess.running) {
       pendingRefresh = true
       return
@@ -182,6 +245,18 @@ Item {
     fetchProcess.running = true
   }
 
+  function refreshEarthquakes() {
+    if (earthquakeFetchProcess.running) {
+      earthquakePendingRefresh = true
+      return
+    }
+    earthquakeLoading = true
+    earthquakeProcessOutput = ""
+    earthquakeProcessError = ""
+    earthquakeFetchProcess.command = [backendPath, "fetch-earthquakes"]
+    earthquakeFetchProcess.running = true
+  }
+
   function applyWatchConfig(raw, assignValues) {
     if (typeof raw !== "string" || raw.length === 0 || raw.length > 64 * 1024) return false
     var parsed
@@ -190,7 +265,10 @@ Item {
     } catch (error) {
       return false
     }
-    if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.places)
+    if (!parsed || (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2)
+        || (parsed.schemaVersion === 2
+          && typeof parsed.defaultLocationInitialized !== "boolean")
+        || !Array.isArray(parsed.places)
         || parsed.places.length > 12) return false
     var normalized = []
     var identifiers = ({})
@@ -202,6 +280,8 @@ Item {
     }
     if (assignValues !== false) {
       watchPlaces = normalized
+      defaultLocationInitialized = parsed.schemaVersion === 2
+        ? parsed.defaultLocationInitialized === true : normalized.length > 0
       watchPlacesLoaded = true
       watchPlacesError = ""
     }
@@ -225,7 +305,11 @@ Item {
 
   function persistWatchPlaces() {
     if (!watchPlacesLoaded) return
-    var payload = JSON.stringify({ schemaVersion: 1, places: watchPlaces })
+    var payload = JSON.stringify({
+      schemaVersion: 2,
+      defaultLocationInitialized: defaultLocationInitialized,
+      places: watchPlaces
+    })
     if (watchProcess.running) {
       pendingWatchPayload = payload
       return
@@ -233,7 +317,7 @@ Item {
     runWatchProcess("save", payload)
   }
 
-  function upsertWatchPlace(value) {
+  function upsertWatchPlace(value, persistChanges) {
     var requested = ({})
     if (value) for (var key in value) requested[key] = value[key]
     if (!requested.id) requested.id = "place-" + Date.now().toString(36)
@@ -255,7 +339,10 @@ Item {
       next.push(place)
     }
     watchPlaces = next
-    persistWatchPlaces()
+    if (persistChanges !== false) {
+      defaultLocationError = ""
+      persistWatchPlaces()
+    }
     return place.id
   }
 
@@ -268,6 +355,65 @@ Item {
     if (next.length === watchPlaces.length) return
     watchPlaces = next
     persistWatchPlaces()
+  }
+
+  function applyDefaultLocation(raw) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 64 * 1024)
+      return false
+    var parsed
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      return false
+    }
+    if (!parsed || parsed.schemaVersion !== 1
+        || typeof parsed.available !== "boolean"
+        || ["none", "omarchy-weather", "omarchy-weather-search", "wttr-in-ip"]
+          .indexOf(String(parsed.provider || "")) < 0) return false
+    if (parsed.available !== true) return parsed.provider === "none"
+    var name = typeof parsed.name === "string"
+      ? parsed.name.replace(/\s+/g, " ").trim() : ""
+    if (!name || name.length > 40 || /[\x00-\x1f\x7f<>]/.test(name)
+        || !Model.validCoordinate(parsed.latitude, parsed.longitude)) return false
+    var place = Model.normalizeWatchPlace({
+      id: defaultWatchPlaceId,
+      name: name,
+      latitude: parsed.latitude,
+      longitude: parsed.longitude,
+      radiusKm: Model.defaultWatchRadiusKm(useImperial)
+    })
+    if (!place) return false
+    if (!upsertWatchPlace(place, false)) return false
+    defaultLocationInitialized = true
+    persistWatchPlaces()
+    return true
+  }
+
+  function requestDefaultLocation() {
+    if (!settingsReady || !watchPlacesLoaded || defaultLocationInitialized
+        || defaultLocationAttempted || defaultLocationProcess.running) return
+    if (watchPlaces.length >= 12) {
+      defaultLocationAttempted = true
+      return
+    }
+    defaultLocationLoading = true
+    defaultLocationError = ""
+    defaultLocationProcessOutput = ""
+    defaultLocationProcessError = ""
+    var command = [backendPath, "default-location"]
+    if (onlinePlaceSearchEnabled) command.push("--allow-network")
+    defaultLocationProcess.command = command
+    defaultLocationProcess.running = true
+  }
+
+  function applyMotionPreference(raw) {
+    var value = Model.motionPreferenceValue(raw)
+    if (typeof value === "boolean") {
+      motionEnabled = value
+      return true
+    }
+    motionEnabled = false
+    return false
   }
 
   function normalizedPlaceSearchQuery(value) {
@@ -500,6 +646,23 @@ Item {
     return true
   }
 
+  function applyEarthquakePayload(raw) {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 8 * 1024 * 1024)
+      return false
+    var parsed
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      return false
+    }
+    if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.events)
+        || parsed.events.length > 500) return false
+    earthquakePayload = parsed
+    earthquakes = parsed.events
+    earthquakeHasLoaded = true
+    return true
+  }
+
   function currentAlertSnapshot() {
     return Model.alertSnapshot(storms, outlooks, alertRegion, formationThreshold, notifyNamedStorms)
   }
@@ -705,7 +868,43 @@ Item {
       }
       if (root.pendingRefresh) {
         root.pendingRefresh = false
-        Qt.callLater(root.refresh)
+        Qt.callLater(root.refreshTropical)
+      }
+    }
+  }
+
+  Process {
+    id: earthquakeFetchProcess
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.earthquakeProcessOutput = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.earthquakeProcessError = text
+    }
+    onExited: function(exitCode) {
+      var accepted = root.applyEarthquakePayload(root.earthquakeProcessOutput)
+      root.earthquakeProcessOutput = ""
+      root.earthquakeLoading = false
+      root.earthquakeConsecutiveFailures = accepted && root.earthquakeStatus === "fresh"
+        ? 0 : Math.min(6, root.earthquakeConsecutiveFailures + 1)
+      if (!accepted && !root.earthquakeHasLoaded) {
+        root.earthquakePayload = {
+          schemaVersion: 1,
+          status: "error",
+          stale: false,
+          fetchedAt: "",
+          checkedAt: "",
+          source: root.earthquakePayload.source,
+          error: "Earthquake data could not be read. Try again shortly.",
+          events: []
+        }
+      }
+      if (root.earthquakePendingRefresh) {
+        root.earthquakePendingRefresh = false
+        Qt.callLater(root.refreshEarthquakes)
       }
     }
   }
@@ -732,11 +931,12 @@ Item {
       onStreamFinished: root.watchProcessError = text
     }
     onExited: function(exitCode) {
-      var shouldAssign = root.watchProcessOperation === "load" || root.pendingWatchPayload === ""
+      var completedOperation = root.watchProcessOperation
+      var shouldAssign = completedOperation === "load" || root.pendingWatchPayload === ""
       var accepted = exitCode === 0 && root.applyWatchConfig(root.watchProcessOutput, shouldAssign)
       if (!accepted) {
-        if (root.watchProcessOperation === "load") root.watchPlacesLoaded = false
-        root.watchPlacesError = root.watchProcessOperation === "save"
+        if (completedOperation === "load") root.watchPlacesLoaded = false
+        root.watchPlacesError = completedOperation === "save"
           ? "Watch places could not be saved. They remain active for this session."
           : "Saved watch places could not be loaded. The file was left unchanged."
       }
@@ -747,6 +947,46 @@ Item {
         root.pendingWatchPayload = ""
         Qt.callLater(function() { root.runWatchProcess("save", nextPayload) })
       }
+      if (accepted && completedOperation === "load")
+        Qt.callLater(function() { root.requestDefaultLocation() })
+    }
+  }
+
+  Process {
+    id: defaultLocationProcess
+    command: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.defaultLocationProcessOutput = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.defaultLocationProcessError = text
+    }
+    onExited: function(exitCode) {
+      var accepted = exitCode === 0
+        && root.applyDefaultLocation(root.defaultLocationProcessOutput)
+      root.defaultLocationLoading = false
+      root.defaultLocationAttempted = true
+      if (!accepted)
+        root.defaultLocationError = "Your location could not be added automatically."
+      root.defaultLocationProcessOutput = ""
+      root.defaultLocationProcessError = ""
+    }
+  }
+
+  Process {
+    id: motionPreferenceProcess
+    command: ["hyprctl", "getoption", "animations:enabled", "-j"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.motionPreferenceOutput = text
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0) root.applyMotionPreference(root.motionPreferenceOutput)
+      else root.motionEnabled = false
+      root.motionPreferenceKnown = true
+      root.motionPreferenceOutput = ""
     }
   }
 
@@ -836,19 +1076,37 @@ Item {
     repeat: true
     running: true
     triggeredOnStart: true
-    onTriggered: root.refresh()
+    onTriggered: root.refreshTropical()
+  }
+
+  Timer {
+    id: earthquakeRefreshTimer
+    interval: root.earthquakeRefreshMinutes * 60 * 1000 * root.earthquakeRetryMultiplier
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: root.refreshEarthquakes()
   }
 
   onAlertConfigKeyChanged: {
     if (!settingsReady) return
     armAlertsQuietly()
   }
+  onSettingsReadyChanged: {
+    if (settingsReady) requestDefaultLocation()
+  }
   onPlaceAlertConfigKeyChanged: armPlaceAlertsQuietly()
   onOnlinePlaceSearchEnabledChanged: {
     if (!onlinePlaceSearchEnabled) {
       clearPlaceSearch()
       clearReverseGeocode()
+    } else if (watchPlacesLoaded && !defaultLocationInitialized) {
+      defaultLocationAttempted = false
+      requestDefaultLocation()
     }
   }
-  Component.onCompleted: loadWatchPlaces()
+  Component.onCompleted: {
+    loadWatchPlaces()
+    motionPreferenceProcess.running = true
+  }
 }

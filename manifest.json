@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "io.github.olivoil.hurricane-tracker",
-  "name": "Hurricane Tracker",
-  "version": "0.0.1",
+  "name": "Hurricane + Earthquake Tracker",
+  "version": "0.1.0",
   "author": "Olivier Melcher",
   "license": "MIT",
-  "description": "A calm, native Omarchy hurricane tracker for NHC cyclones, regional outlooks, forecast tracks, and discussions.",
+  "description": "A calm, native Omarchy tracker for NHC cyclones, location-based tropical alerts, and recent USGS earthquakes.",
   "homepage": "https://github.com/olivoil/omarchy-hurricane-tracker",
   "repository": "https://github.com/olivoil/omarchy-hurricane-tracker",
   "keywords": [
@@ -13,6 +13,9 @@
     "weather",
     "storm",
     "noaa",
+    "earthquake",
+    "usgs",
+    "alerts",
     "map"
   ],
   "kinds": [
@@ -27,13 +30,14 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Hurricane Tracker",
-    "description": "Active NHC storms and forecast tracks",
+    "displayName": "Hurricane + Earthquake Tracker",
+    "description": "NHC cyclone activity, watched-location alerts, and recent USGS earthquakes",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center",
     "defaults": {
       "refreshMinutes": 15,
+      "earthquakeRefreshMinutes": 5,
       "onlinePlaceSearch": true,
       "alertRegion": "Off",
       "formationThreshold": "Medium (40%)",
@@ -48,14 +52,24 @@
         "max": 60,
         "step": 5,
         "defaultValue": 15,
-        "description": "How often Hurricane Tracker checks the National Hurricane Center for updates."
+        "description": "How often the tracker checks the National Hurricane Center for updates."
+      },
+      {
+        "key": "earthquakeRefreshMinutes",
+        "type": "integer",
+        "label": "Earthquake refresh interval (minutes)",
+        "min": 5,
+        "max": 60,
+        "step": 5,
+        "defaultValue": 5,
+        "description": "How often the tracker checks the USGS magnitude 4.5+ weekly feed for updates."
       },
       {
         "key": "onlinePlaceSearch",
         "type": "boolean",
         "label": "Online place lookup",
         "defaultValue": true,
-        "description": "Allow typed place searches through Open-Meteo and nearby-place naming for map clicks through OpenStreetMap. Turn this off to keep map placement local."
+        "description": "Allow typed place searches through Open-Meteo, nearby-place naming through OpenStreetMap, and a one-time coarse location lookup when Omarchy has no saved weather coordinates. Turn this off to keep location setup local."
       },
       {
         "key": "alertRegion",

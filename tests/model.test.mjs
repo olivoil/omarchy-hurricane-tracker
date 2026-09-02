@@ -14,6 +14,53 @@ assert.equal(model.wrapLongitude(190), -170)
 assert.equal(model.longitudeNear(170, -175), 185)
 assert.equal(model.validCoordinate(20, -70), true)
 assert.equal(model.validCoordinate(100, -70), false)
+assert.equal(model.wheelScrollDistance(18, 120, 272), -18)
+assert.equal(model.wheelScrollDistance(0, 120, 272), -272)
+assert.equal(model.wheelScrollDistance(0, -60, 272), 136)
+assert.equal(model.wheelScrollDistance(0, 0, 272), 0)
+assert.equal(model.motionPreferenceValue('{"bool":true}'), true)
+assert.equal(model.motionPreferenceValue('{"bool":false}'), false)
+assert.equal(model.motionPreferenceValue('{"int":1}'), true)
+assert.equal(model.motionPreferenceValue('{"int":0}'), false)
+assert.equal(model.motionPreferenceValue('{"int":2}'), null)
+assert.equal(model.motionPreferenceValue('not-json'), null)
+
+const sampledDragVelocity = model.dragVelocity(0, 16, 16)
+assert.ok(sampledDragVelocity > 300 && sampledDragVelocity < 500)
+assert.ok(model.dragVelocity(0, 200, 1) > 0)
+assert.ok(model.dragVelocity(0, 200, 1) <= 1800)
+assert.ok(model.dragVelocity(0, 16, 8) > model.dragVelocity(0, 16, 32))
+
+const oneMomentumFrame = model.dragMomentumStep(900, -420, 32)
+const firstMomentumFrame = model.dragMomentumStep(900, -420, 16)
+const secondMomentumFrame = model.dragMomentumStep(
+  firstMomentumFrame.velocityX,
+  firstMomentumFrame.velocityY,
+  16
+)
+assert.ok(Math.abs(
+  oneMomentumFrame.deltaX
+    - firstMomentumFrame.deltaX
+    - secondMomentumFrame.deltaX
+) < 1e-9)
+assert.ok(Math.abs(
+  oneMomentumFrame.deltaY
+    - firstMomentumFrame.deltaY
+    - secondMomentumFrame.deltaY
+) < 1e-9)
+assert.ok(Math.abs(
+  oneMomentumFrame.velocityX - secondMomentumFrame.velocityX
+) < 1e-9)
+assert.ok(Math.abs(
+  oneMomentumFrame.velocityY - secondMomentumFrame.velocityY
+) < 1e-9)
+assert.ok(oneMomentumFrame.velocityX < 900)
+assert.ok(oneMomentumFrame.velocityY > -420)
+assert.ok(
+  model.dragMomentumStep(900, 0, 16).deltaX
+    > model.dragMomentumStep(300, 0, 16).deltaX
+)
+assert.equal(model.dragMomentumStep(10, -8, 16).active, false)
 
 const storm = {
   id: "al012026",
@@ -121,6 +168,7 @@ assert.ok(model.outlookWatchProximity(visualOnlyConnector, {
 const systems = model.orderedSystems([storm], [outlook])
 assert.deepEqual(Array.from(systems, item => item.key), ["storm:al012026", "outlook:al-outlook-1"])
 assert.equal(model.selectedKeyAfterRefresh(systems, "outlook:al-outlook-1"), "outlook:al-outlook-1")
+assert.equal(model.selectedKeyAfterRefresh(systems, ""), "")
 assert.equal(model.selectedKeyAfterRefresh(systems, "missing"), "storm:al012026")
 
 const regionRows = model.regionalRows([storm], [outlook])
@@ -148,6 +196,50 @@ assert.ok(sphericalFit.horizontalExtent > 0.08)
 assert.ok(sphericalFit.verticalExtent > 0.05)
 assert.ok(sphericalFit.minimumDepth > 0.9)
 assert.ok(model.regionCoordinates([storm], [outlook], "al").length > model.systemCoordinates(storm).length)
+
+const easternLimbLand = [
+  [80, -20],
+  [100, -20],
+  [100, 20],
+  [80, 20],
+  [80, -20]
+]
+const limbFragments = model.clippedHemisphereRings(easternLimbLand, 0, 0)
+assert.equal(limbFragments.length, 1)
+assert.equal(limbFragments[0].clipped, true)
+assert.ok(limbFragments[0].boundaryLength >= 4)
+assert.ok(limbFragments[0].points.length > limbFragments[0].boundaryLength)
+assert.ok(limbFragments[0].points.every(point => point.z >= -1e-9))
+const horizonPoints = [
+  limbFragments[0].points[limbFragments[0].boundaryLength - 1],
+  ...limbFragments[0].points.slice(limbFragments[0].boundaryLength),
+  limbFragments[0].points[0]
+]
+assert.ok(horizonPoints.length > 3)
+assert.ok(horizonPoints.every(point => Math.abs(Math.hypot(point.x, point.y) - 1) < 1e-9))
+assert.ok(horizonPoints.every(point => point.x > 0.9))
+for (let index = 1; index < horizonPoints.length; index++) {
+  assert.ok(Math.hypot(
+    horizonPoints[index].x - horizonPoints[index - 1].x,
+    horizonPoints[index].y - horizonPoints[index - 1].y
+  ) < 0.05)
+}
+const preparedLimbLand = model.prepareHemisphereRing(easternLimbLand)
+const preparedLimbFragments = model.clippedPreparedHemisphereRings(
+  preparedLimbLand, 0, 0
+)
+assert.equal(preparedLimbLand.length, easternLimbLand.length - 1)
+assert.equal(preparedLimbFragments.length, limbFragments.length)
+assert.equal(preparedLimbFragments[0].boundaryLength, limbFragments[0].boundaryLength)
+assert.equal(preparedLimbFragments[0].points.length, limbFragments[0].points.length)
+for (let index = 0; index < limbFragments[0].points.length; index++) {
+  assert.ok(Math.abs(
+    preparedLimbFragments[0].points[index].x - limbFragments[0].points[index].x
+  ) < 1e-9)
+  assert.ok(Math.abs(
+    preparedLimbFragments[0].points[index].y - limbFragments[0].points[index].y
+  ) < 1e-9)
+}
 
 assert.equal(model.alertRegionCode("Atlantic"), "al")
 assert.equal(model.alertThresholdValue("Medium (40%)"), 40)
@@ -947,3 +1039,69 @@ assert.equal(model.activeSummary([storm]), "1 active cyclone: Ada")
 assert.equal(model.selectedIndexAfterRefresh([storm], "al012026"), 0)
 assert.equal(model.selectedIndexAfterRefresh([storm], "missing"), 0)
 assert.equal(model.trackingSummary([storm], [outlook]), "1 active cyclone · 1 outlook area")
+
+const earthquake = {
+  id: "us7000test1",
+  kind: "earthquake",
+  name: "42 km W of Test Coast",
+  magnitude: 6.14,
+  latitude: 18.75,
+  longitude: -101.25,
+  depthKm: 12.4,
+  occurredAt: "2026-08-29T12:34:56Z",
+  updatedAt: "2026-08-29T13:00:00Z",
+  reviewStatus: "reviewed",
+  estimatedIntensity: 6.2,
+  reportedIntensity: 5.4,
+  feltReports: 123,
+  pagerAlert: "yellow",
+  tsunamiInfo: true,
+  officialUrl: "https://earthquake.usgs.gov/earthquakes/eventpage/us7000test1"
+}
+
+assert.equal(model.systemKind(earthquake), "earthquake")
+assert.equal(model.systemKey(earthquake), "earthquake:us7000test1")
+assert.equal(model.earthquakeMagnitudeLabel(earthquake), "M6.1")
+assert.equal(model.earthquakeColor(earthquake), "#e9be62")
+assert.equal(model.formatDepth(earthquake), "12 km deep")
+assert.equal(model.formatDepth({ depthKm: -1.2 }), "Less than 1 km deep")
+assert.equal(model.formatMaximumIntensity(earthquake), "MMI VI estimated")
+assert.equal(model.formatFeltReports(earthquake), "123")
+assert.equal(model.earthquakeImpactLabel(earthquake), "PAGER Yellow")
+assert.equal(model.systemClassificationLabel(earthquake), "Reviewed earthquake")
+assert.ok(model.discussionExcerpt(earthquake).includes("USGS flag is not a warning"))
+assert.equal(model.systemCoordinates(earthquake).length, 1)
+assert.equal(model.systemBounds(earthquake).centreLongitude, -101.25)
+assert.equal(model.safeOfficialUrl(earthquake.officialUrl), earthquake.officialUrl)
+assert.equal(model.safeOfficialUrl("https://earthquake.usgs.gov.attacker.example/event"), "")
+
+const olderEarthquake = {
+  ...earthquake,
+  id: "us7000test2",
+  occurredAt: "2026-08-27T10:00:00Z",
+  pagerAlert: ""
+}
+const earthquakeSystems = model.orderedEarthquakes([olderEarthquake, earthquake])
+assert.deepEqual(Array.from(earthquakeSystems, item => item.key), [
+  "earthquake:us7000test1", "earthquake:us7000test2"
+])
+const earthquakeRows = model.earthquakeRows(
+  [olderEarthquake, earthquake], Date.parse("2026-08-29T14:00:00Z")
+)
+assert.equal(earthquakeRows[0].kind, "section-anchor")
+assert.equal(earthquakeRows[0].name, "Past 24 hours")
+assert.equal(earthquakeRows[0].count, 1)
+assert.equal(earthquakeRows[1].sectionName, "Past 24 hours")
+assert.equal(earthquakeRows[2].name, "Earlier this week")
+assert.equal(model.earthquakeSectionName(
+  earthquake, Date.parse("2026-08-29T14:00:00Z")
+), "Past 24 hours")
+const collapsedEarthquakeRows = model.earthquakeRows(
+  [olderEarthquake, earthquake],
+  Date.parse("2026-08-29T14:00:00Z"),
+  { "Earlier this week": true }
+)
+assert.equal(collapsedEarthquakeRows.filter(row => row.kind === "section-anchor").length, 2)
+assert.equal(collapsedEarthquakeRows.filter(row => row.kind === "system").length, 1)
+assert.equal(collapsedEarthquakeRows[2].name, "Earlier this week")
+assert.equal(model.earthquakeSummary([earthquake, olderEarthquake]), "2 M4.5+ earthquakes in the past week")

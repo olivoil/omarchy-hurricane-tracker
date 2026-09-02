@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.machinery
 import importlib.util
 import http.server
@@ -149,6 +150,58 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(tracker_data.is_safe_url("http://www.nhc.noaa.gov/CurrentStorms.json"))
         self.assertFalse(tracker_data.is_safe_url("https://nhc.noaa.gov.attacker.example/file"))
         self.assertFalse(tracker_data.is_safe_url("https://user@www.nhc.noaa.gov/file"))
+
+    def test_earthquake_feed_is_normalized_and_filters_non_earthquakes(self):
+        events, generated_at = tracker_data.parse_earthquake_feed(
+            fixture("earthquakes.geojson")
+        )
+        self.assertEqual(generated_at, "2026-08-29T13:00:00Z")
+        self.assertEqual([event["id"] for event in events], ["us7000test1", "us7000test2"])
+        event = events[0]
+        self.assertEqual(event["magnitude"], 6.1)
+        self.assertEqual(event["depthKm"], 12.4)
+        self.assertEqual(event["occurredAt"], "2026-08-29T12:34:56Z")
+        self.assertEqual(event["pagerAlert"], "yellow")
+        self.assertEqual(event["estimatedIntensity"], 6.2)
+        self.assertEqual(event["feltReports"], 123)
+        self.assertTrue(event["tsunamiInfo"])
+        self.assertEqual(event["network"], "US")
+
+    def test_earthquake_feed_enforces_threshold_and_mmi_range(self):
+        document = json.loads(fixture("earthquakes.geojson"))
+        below_threshold = copy.deepcopy(document["features"][0])
+        below_threshold["id"] = "us7000small"
+        below_threshold["properties"]["mag"] = 4.4
+        document["features"].append(below_threshold)
+        document["features"][0]["properties"]["mmi"] = 12.0
+
+        events, _ = tracker_data.parse_earthquake_feed(json.dumps(document).encode())
+
+        self.assertNotIn("us7000small", [event["id"] for event in events])
+        self.assertIsNone(events[0]["estimatedIntensity"])
+
+    def test_only_usgs_https_earthquake_urls_are_accepted(self):
+        self.assertTrue(tracker_data.is_safe_earthquake_url(tracker_data.EARTHQUAKES_URL))
+        self.assertFalse(tracker_data.is_safe_earthquake_url("http://earthquake.usgs.gov/feed"))
+        self.assertFalse(tracker_data.is_safe_earthquake_url(
+            "https://earthquake.usgs.gov.attacker.example/feed"
+        ))
+        self.assertFalse(tracker_data.is_safe_earthquake_url(
+            "https://user@earthquake.usgs.gov/feed"
+        ))
+
+    def test_earthquake_payload_uses_the_official_summary_feed(self):
+        def fetcher(url: str, maximum: int) -> bytes:
+            self.assertEqual(url, tracker_data.EARTHQUAKES_URL)
+            content = fixture("earthquakes.geojson")
+            self.assertLessEqual(len(content), maximum)
+            return content
+
+        payload = tracker_data.build_earthquake_payload(fetcher)
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["source"]["name"], "USGS Earthquake Hazards Program")
+        self.assertEqual(len(payload["events"]), 2)
 
     def test_api_response_reader_enforces_status_type_and_streaming_size_limit(self):
         oversized = FakeResponse(
@@ -389,6 +442,98 @@ class BackendTests(unittest.TestCase):
                 },
             )
 
+    def test_default_location_prefers_omarchy_weather_coordinates_without_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "weather.json"
+            path.write_text(
+                json.dumps({
+                    "name": "Cancún",
+                    "latitude": 21.1619,
+                    "longitude": -86.8515,
+                }),
+                encoding="utf-8",
+            )
+            payload = tracker_data.resolve_default_location(
+                False,
+                path,
+                place_searcher=mock.Mock(side_effect=AssertionError("unexpected search")),
+                ip_fetcher=mock.Mock(side_effect=AssertionError("unexpected IP lookup")),
+            )
+
+        self.assertEqual(payload, {
+            "schemaVersion": 1,
+            "available": True,
+            "provider": "omarchy-weather",
+            "name": "Cancún",
+            "latitude": 21.1619,
+            "longitude": -86.8515,
+        })
+
+    def test_default_location_uses_bounded_ip_city_only_when_network_is_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.json"
+            offline_fetcher = mock.Mock(side_effect=AssertionError("unexpected IP lookup"))
+            self.assertEqual(
+                tracker_data.resolve_default_location(
+                    False, missing, ip_fetcher=offline_fetcher
+                ),
+                tracker_data.unavailable_default_location(),
+            )
+            offline_fetcher.assert_not_called()
+
+            payload = tracker_data.resolve_default_location(
+                True,
+                missing,
+                ip_fetcher=lambda: {
+                    "nearest_area": [{
+                        "areaName": [{"value": "Sarasota"}],
+                        "latitude": "27.3364",
+                        "longitude": "-82.5307",
+                    }]
+                },
+            )
+
+        self.assertEqual(payload["provider"], "wttr-in-ip")
+        self.assertEqual(payload["name"], "Sarasota")
+        self.assertEqual(payload["latitude"], 27.3364)
+        self.assertEqual(payload["longitude"], -82.5307)
+        self.assertTrue(tracker_data.is_wttr_location_url(tracker_data.WTTR_LOCATION_URL))
+        self.assertFalse(
+            tracker_data.is_wttr_location_url(
+                "https://wttr.in.attacker.test/?format=j1"
+            )
+        )
+        self.assertFalse(
+            tracker_data.is_wttr_location_url("https://wttr.in/?format=j1&probe=1")
+        )
+        redirected = FakeResponse(
+            b"{}",
+            url="https://attacker.test/private",
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaisesRegex(tracker_data.DataError, "redirect"):
+            tracker_data.fetch_wttr_location_json(opener=FakeOpener(redirected))
+
+    def test_named_omarchy_weather_location_uses_the_safe_search_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "weather.json"
+            path.write_text(json.dumps({"name": "Sarasota, FL"}), encoding="utf-8")
+            payload = tracker_data.resolve_default_location(
+                True,
+                path,
+                place_searcher=lambda query: {
+                    "results": [{
+                        "name": "Sarasota",
+                        "latitude": 27.33643,
+                        "longitude": -82.53065,
+                    }]
+                },
+                ip_fetcher=mock.Mock(side_effect=AssertionError("unexpected IP lookup")),
+            )
+
+        self.assertEqual(payload["provider"], "omarchy-weather-search")
+        self.assertEqual(payload["name"], "Sarasota")
+
     def test_live_payload_combines_summary_track_cone_and_history(self):
         resources = {
             tracker_data.CURRENT_STORMS_URL: fixture("current-storms.json"),
@@ -564,6 +709,23 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(tracker_data.read_cache(path), payload)
 
+    def test_earthquake_network_failure_returns_its_own_stale_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "earthquakes.json"
+            cached = tracker_data.build_earthquake_payload(
+                lambda url, maximum: fixture("earthquakes.geojson")
+            )
+            tracker_data.write_earthquake_cache(cached, path)
+
+            def failure(url: str, maximum: int) -> bytes:
+                raise tracker_data.DataError("offline")
+
+            payload = tracker_data.fetch_earthquakes_with_fallback(failure, path)
+            self.assertEqual(payload["status"], "cached")
+            self.assertTrue(payload["stale"])
+            self.assertEqual(len(payload["events"]), 2)
+            self.assertIn("USGS earthquake feed", payload["error"])
+
     def test_watch_places_are_sanitized_private_and_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config" / "watch-places.json"
@@ -604,12 +766,40 @@ class BackendTests(unittest.TestCase):
             }
             saved = tracker_data.write_watch_config(requested, path)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(saved["schemaVersion"], 1)
+            self.assertEqual(saved["schemaVersion"], 2)
+            self.assertFalse(saved["defaultLocationInitialized"])
             self.assertEqual(len(saved["places"]), tracker_data.MAX_WATCH_PLACES)
             self.assertEqual(saved["places"][0]["id"], "home")
             self.assertEqual(saved["places"][0]["name"], "Home base")
             self.assertEqual(saved["places"][0]["radiusKm"], 2000)
             self.assertEqual(tracker_data.read_watch_config(path), saved)
+
+    def test_watch_config_migrates_once_and_remembers_default_location_removal(self):
+        place = {
+            "id": "home",
+            "name": "Home",
+            "latitude": 21.1619,
+            "longitude": -86.8515,
+            "radiusKm": 1000,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "watch-places.json"
+            path.write_text(
+                json.dumps({"schemaVersion": 1, "places": [place]}),
+                encoding="utf-8",
+            )
+            migrated = tracker_data.read_watch_config(path)
+            self.assertEqual(migrated["schemaVersion"], 2)
+            self.assertTrue(migrated["defaultLocationInitialized"])
+
+            removed = tracker_data.write_watch_config({
+                "schemaVersion": 2,
+                "defaultLocationInitialized": True,
+                "places": [],
+            }, path)
+            self.assertEqual(removed["places"], [])
+            self.assertTrue(removed["defaultLocationInitialized"])
+            self.assertEqual(tracker_data.read_watch_config(path), removed)
 
     def test_corrupt_watch_file_is_reported_without_being_replaced(self):
         with tempfile.TemporaryDirectory() as directory:

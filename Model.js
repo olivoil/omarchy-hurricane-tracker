@@ -2,6 +2,67 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value)))
 }
 
+function wheelScrollDistance(pixelDeltaY, angleDeltaY, discreteStep) {
+  var pixels = Number(pixelDeltaY)
+  if (isFinite(pixels) && pixels !== 0) return -pixels
+
+  var angle = Number(angleDeltaY)
+  if (!isFinite(angle) || angle === 0) return 0
+  var step = Number(discreteStep)
+  if (!isFinite(step) || step <= 0) step = 272
+  return -angle / 120 * step
+}
+
+function motionPreferenceValue(raw) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(raw || ""))
+  } catch (error) {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object") return null
+  if (typeof parsed.bool === "boolean") return parsed.bool
+  if (parsed.int === 0 || parsed.int === 1) return parsed.int === 1
+  return null
+}
+
+function dragVelocity(previousVelocity, deltaPixels, elapsedMilliseconds) {
+  var previous = Number(previousVelocity)
+  if (!isFinite(previous)) previous = 0
+  var elapsed = Number(elapsedMilliseconds)
+  if (!isFinite(elapsed) || elapsed <= 0) return previous
+  elapsed = clamp(elapsed, 1, 64)
+  var instantaneous = clamp(Number(deltaPixels) * 1000 / elapsed, -1800, 1800)
+  if (!isFinite(instantaneous)) return previous
+  var blend = 1 - Math.exp(-elapsed / 32)
+  return clamp(previous + (instantaneous - previous) * blend, -1800, 1800)
+}
+
+// Exponential friction gives the same coast distance whether a frame arrives
+// on time or late. Distances are returned in screen pixels so momentum keeps
+// the same visual weight at every map zoom level.
+function dragMomentumStep(velocityX, velocityY, elapsedMilliseconds) {
+  var x = Number(velocityX)
+  var y = Number(velocityY)
+  if (!isFinite(x)) x = 0
+  if (!isFinite(y)) y = 0
+  var elapsed = Number(elapsedMilliseconds)
+  if (!isFinite(elapsed) || elapsed <= 0) elapsed = 0
+  var seconds = clamp(elapsed, 0, 50) / 1000
+  var friction = 4.8
+  var decay = Math.exp(-friction * seconds)
+  var travel = (1 - decay) / friction
+  var nextX = x * decay
+  var nextY = y * decay
+  return {
+    deltaX: x * travel,
+    deltaY: y * travel,
+    velocityX: nextX,
+    velocityY: nextY,
+    active: Math.hypot(nextX, nextY) >= 18
+  }
+}
+
 function wrapLongitude(value) {
   var wrapped = (Number(value) + 180) % 360
   if (wrapped < 0) wrapped += 360
@@ -70,6 +131,12 @@ function stormCoordinates(storm) {
   return output
 }
 
+function earthquakeCoordinates(earthquake) {
+  var output = []
+  pushCoordinate(output, earthquake)
+  return output
+}
+
 function stormBounds(storm) {
   var coordinates = stormCoordinates(storm)
   var reference = storm && validCoordinate(storm.latitude, storm.longitude)
@@ -127,12 +194,15 @@ function boundsForCoordinates(coordinates, referenceLongitude, fallback) {
 
 function systemKind(system) {
   if (!system) return ""
+  if (String(system.kind || "") === "earthquake" || system.magnitude !== undefined) return "earthquake"
   if (String(system.kind || "") === "outlook" || system.sevenDayChance !== undefined) return "outlook"
   return "storm"
 }
 
 function systemCoordinates(system) {
-  return systemKind(system) === "outlook" ? outlookCoordinates(system) : stormCoordinates(system)
+  var kind = systemKind(system)
+  if (kind === "earthquake") return earthquakeCoordinates(system)
+  return kind === "outlook" ? outlookCoordinates(system) : stormCoordinates(system)
 }
 
 function systemKey(system) {
@@ -161,6 +231,57 @@ function orderedSystems(storms, outlooks) {
       if (String(developing[o] && developing[o].basin || "") === basins[b]) output.push(copySystem(developing[o], "outlook"))
     }
   }
+  return output
+}
+
+function orderedEarthquakes(earthquakes) {
+  var rows = Array.isArray(earthquakes) ? earthquakes : []
+  var output = []
+  for (var i = 0; i < rows.length; i++) output.push(copySystem(rows[i], "earthquake"))
+  output.sort(function(first, second) {
+    var firstTime = Date.parse(String(first && first.occurredAt || ""))
+    var secondTime = Date.parse(String(second && second.occurredAt || ""))
+    if (!isFinite(firstTime)) firstTime = 0
+    if (!isFinite(secondTime)) secondTime = 0
+    return secondTime - firstTime
+  })
+  return output
+}
+
+function earthquakeSectionName(earthquake, nowMilliseconds) {
+  var now = nowMilliseconds === undefined ? Date.now() : Number(nowMilliseconds)
+  var cutoff = now - 24 * 60 * 60 * 1000
+  var occurred = Date.parse(String(earthquake && earthquake.occurredAt || ""))
+  return isFinite(occurred) && occurred >= cutoff ? "Past 24 hours" : "Earlier this week"
+}
+
+function earthquakeRows(earthquakes, nowMilliseconds, collapsedSections) {
+  var systems = orderedEarthquakes(earthquakes)
+  if (systems.length === 0) return [{ kind: "empty", name: "Earthquakes", sectionName: "" }]
+  var now = nowMilliseconds === undefined ? Date.now() : Number(nowMilliseconds)
+  var recent = []
+  var earlier = []
+  for (var i = 0; i < systems.length; i++) {
+    if (earthquakeSectionName(systems[i], now) === "Past 24 hours") recent.push(systems[i])
+    else earlier.push(systems[i])
+  }
+  var output = []
+  function appendSection(name, rows) {
+    if (rows.length === 0) return
+    output.push({ kind: "section-anchor", name: name, sectionName: name, count: rows.length })
+    if (collapsedSections && collapsedSections[name] === true) return
+    for (var index = 0; index < rows.length; index++) {
+      output.push({
+        kind: "system",
+        key: rows[index].key,
+        system: rows[index],
+        sectionName: name,
+        count: rows.length
+      })
+    }
+  }
+  appendSection("Past 24 hours", recent)
+  appendSection("Earlier this week", earlier)
   return output
 }
 
@@ -213,12 +334,22 @@ function systemByKey(systems, key) {
 }
 
 function selectedKeyAfterRefresh(systems, selectedKey) {
+  if (String(selectedKey || "") === "") return ""
   var selected = systemByKey(systems, selectedKey)
   return selected ? selected.key : (systems.length > 0 ? systems[0].key : "")
 }
 
 function systemBounds(system) {
-  if (systemKind(system) === "outlook") {
+  var kind = systemKind(system)
+  if (kind === "earthquake") {
+    return {
+      centreLatitude: clamp(Number(system && system.latitude || 0), -75, 75),
+      centreLongitude: wrapLongitude(Number(system && system.longitude || 0)),
+      latitudeSpan: 12,
+      longitudeSpan: 18
+    }
+  }
+  if (kind === "outlook") {
     return boundsForCoordinates(
       outlookCoordinates(system),
       system && system.longitude,
@@ -270,6 +401,177 @@ function orthographicPoint(latitude, longitude, centreLatitude, centreLongitude)
     y: Math.cos(phi0) * Math.sin(phi) - Math.sin(phi0) * cosPhi * Math.cos(delta),
     z: Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * cosPhi * Math.cos(delta)
   }
+}
+
+function sameHemispherePoint(first, second) {
+  if (!first || !second) return false
+  var dx = first.x - second.x
+  var dy = first.y - second.y
+  var dz = first.z - second.z
+  return dx * dx + dy * dy + dz * dz < 1e-18
+}
+
+function pushHemispherePoint(points, point) {
+  if (!point) return
+  var previous = points.length > 0 ? points[points.length - 1] : null
+  if (sameHemispherePoint(previous, point)) {
+    if (point.horizon) {
+      previous.z = 0
+      previous.horizon = true
+    }
+    return
+  }
+  points.push(point)
+}
+
+function prepareHemisphereRing(coordinates) {
+  var rows = Array.isArray(coordinates) ? coordinates : []
+  var points = []
+  var radians = Math.PI / 180
+  for (var index = 0; index < rows.length; index++) {
+    var value = rows[index]
+    var latitude = Array.isArray(value) ? Number(value[1]) : Number(value && value.latitude)
+    var longitude = Array.isArray(value) ? Number(value[0]) : Number(value && value.longitude)
+    if (!validCoordinate(latitude, longitude)) continue
+    var phi = latitude * radians
+    var lambda = longitude * radians
+    var cosPhi = Math.cos(phi)
+    pushHemispherePoint(points, {
+      x: cosPhi * Math.sin(lambda),
+      y: Math.sin(phi),
+      z: cosPhi * Math.cos(lambda)
+    })
+  }
+  if (points.length > 1 && sameHemispherePoint(points[0], points[points.length - 1]))
+    points.pop()
+  return points
+}
+
+function projectPreparedHemisphereRing(prepared, centreLatitude, centreLongitude) {
+  var source = Array.isArray(prepared) ? prepared : []
+  var points = []
+  var radians = Math.PI / 180
+  var phi0 = Number(centreLatitude) * radians
+  var lambda0 = Number(centreLongitude) * radians
+  var sinPhi0 = Math.sin(phi0)
+  var cosPhi0 = Math.cos(phi0)
+  var sinLambda0 = Math.sin(lambda0)
+  var cosLambda0 = Math.cos(lambda0)
+  for (var index = 0; index < source.length; index++) {
+    var world = source[index]
+    if (!world) continue
+    var forward = world.z * cosLambda0 + world.x * sinLambda0
+    var z = sinPhi0 * world.y + cosPhi0 * forward
+    if (Math.abs(z) < 1e-12) z = 0
+    points.push({
+      x: world.x * cosLambda0 - world.z * sinLambda0,
+      y: cosPhi0 * world.y - sinPhi0 * forward,
+      z: z,
+      horizon: z === 0
+    })
+  }
+  return points
+}
+
+function horizonIntersection(first, second) {
+  if (Math.abs(first.z) < 1e-12)
+    return { x: first.x, y: first.y, z: 0, horizon: true }
+  if (Math.abs(second.z) < 1e-12)
+    return { x: second.x, y: second.y, z: 0, horizon: true }
+  var denominator = first.z - second.z
+  var amount = Math.abs(denominator) < 1e-12 ? 0.5 : first.z / denominator
+  amount = clamp(amount, 0, 1)
+  var x = first.x + (second.x - first.x) * amount
+  var y = first.y + (second.y - first.y) * amount
+  var radius = Math.hypot(x, y)
+  if (radius < 1e-12) return null
+  return { x: x / radius, y: y / radius, z: 0, horizon: true }
+}
+
+function closeHemisphereFragment(boundary) {
+  if (!Array.isArray(boundary) || boundary.length < 3) return null
+  var points = boundary.slice()
+  var entry = boundary[0]
+  var exit = boundary[boundary.length - 1]
+  var startAngle = Math.atan2(exit.y, exit.x)
+  var delta = Math.atan2(entry.y, entry.x) - startAngle
+  while (delta > Math.PI) delta -= Math.PI * 2
+  while (delta < -Math.PI) delta += Math.PI * 2
+  var steps = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 90)))
+  for (var step = 1; step < steps; step++) {
+    var angle = startAngle + delta * step / steps
+    points.push({
+      x: Math.cos(angle),
+      y: Math.sin(angle),
+      z: 0,
+      horizon: true
+    })
+  }
+  return {
+    points: points,
+    boundaryLength: boundary.length,
+    clipped: true
+  }
+}
+
+function clipHemispherePoints(source) {
+  if (source.length < 3) return []
+
+  var outsideIndex = -1
+  for (var pointIndex = 0; pointIndex < source.length; pointIndex++) {
+    if (source[pointIndex].z < 0) {
+      outsideIndex = pointIndex
+      break
+    }
+  }
+  if (outsideIndex < 0) return [{
+    points: source,
+    boundaryLength: source.length,
+    clipped: false
+  }]
+
+  var fragments = []
+  var current = null
+  for (var offset = 0; offset < source.length; offset++) {
+    var first = source[(outsideIndex + offset) % source.length]
+    var second = source[(outsideIndex + offset + 1) % source.length]
+    var firstVisible = first.z >= 0
+    var secondVisible = second.z >= 0
+    if (!firstVisible && secondVisible) {
+      current = []
+      pushHemispherePoint(current, horizonIntersection(first, second))
+      pushHemispherePoint(current, second)
+    } else if (firstVisible && secondVisible) {
+      if (!current) {
+        current = []
+        pushHemispherePoint(current, first)
+      }
+      pushHemispherePoint(current, second)
+    } else if (firstVisible && !secondVisible) {
+      if (!current) {
+        current = []
+        pushHemispherePoint(current, first)
+      }
+      pushHemispherePoint(current, horizonIntersection(first, second))
+      var fragment = closeHemisphereFragment(current)
+      if (fragment) fragments.push(fragment)
+      current = null
+    }
+  }
+  return fragments
+}
+
+function clippedPreparedHemisphereRings(prepared, centreLatitude, centreLongitude) {
+  return clipHemispherePoints(projectPreparedHemisphereRing(
+    prepared, centreLatitude, centreLongitude))
+}
+
+// Intersect a geographic polygon ring with the visible orthographic
+// hemisphere. Hidden runs are closed along the curved horizon instead of by
+// a straight canvas chord through the globe.
+function clippedHemisphereRings(coordinates, centreLatitude, centreLongitude) {
+  return clippedPreparedHemisphereRings(
+    prepareHemisphereRing(coordinates), centreLatitude, centreLongitude)
 }
 
 function orthographicFit(coordinates, bounds) {
@@ -367,6 +669,59 @@ function outlookColor(outlook) {
   return "#62abc0"
 }
 
+function earthquakeColor(earthquake) {
+  var alert = String(earthquake && earthquake.pagerAlert || "").toLowerCase()
+  if (alert === "red") return "#d84e68"
+  if (alert === "orange") return "#ed6c58"
+  if (alert === "yellow") return "#e9be62"
+  if (alert === "green") return "#45c6b5"
+  return "#89aab1"
+}
+
+function earthquakeMagnitudeLabel(earthquake) {
+  var magnitude = Number(earthquake && earthquake.magnitude)
+  return isFinite(magnitude) ? "M" + magnitude.toFixed(1) : "M?"
+}
+
+function formatDepth(earthquake) {
+  var depth = Number(earthquake && earthquake.depthKm)
+  if (!isFinite(depth)) return "Depth unavailable"
+  if (depth < 1) return "Less than 1 km deep"
+  return Math.round(depth) + " km deep"
+}
+
+function romanIntensity(value) {
+  var intensity = Math.round(Number(value))
+  var labels = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+  return isFinite(intensity) && intensity >= 1 ? labels[clamp(intensity, 1, 10)] : ""
+}
+
+function formatMaximumIntensity(earthquake) {
+  var estimated = romanIntensity(earthquake && earthquake.estimatedIntensity)
+  if (estimated) return "MMI " + estimated + " estimated"
+  var reported = romanIntensity(earthquake && earthquake.reportedIntensity)
+  return reported ? "MMI " + reported + " reported" : "Unavailable"
+}
+
+function formatFeltReports(earthquake) {
+  var value = earthquake && earthquake.feltReports
+  if (value === undefined || value === null || !isFinite(Number(value))) return "Unavailable"
+  var count = Math.max(0, Math.round(Number(value)))
+  return count === 0 ? "None reported" : groupedInteger(count)
+}
+
+function earthquakeReviewLabel(earthquake) {
+  var status = String(earthquake && earthquake.reviewStatus || "").toLowerCase()
+  if (status === "reviewed") return "Reviewed earthquake"
+  if (status === "automatic") return "Automatic earthquake"
+  return "Earthquake"
+}
+
+function earthquakeImpactLabel(earthquake) {
+  var alert = String(earthquake && earthquake.pagerAlert || "").toLowerCase()
+  return alert ? "PAGER " + alert.charAt(0).toUpperCase() + alert.slice(1) : "No PAGER estimate"
+}
+
 function outlookChanceLabel(outlook) {
   var twoDay = Math.max(0, Math.round(Number(outlook && outlook.twoDayChance || 0)))
   var sevenDay = Math.max(0, Math.round(Number(outlook && outlook.sevenDayChance || 0)))
@@ -374,17 +729,35 @@ function outlookChanceLabel(outlook) {
 }
 
 function systemClassificationLabel(system) {
-  if (systemKind(system) === "outlook") return String(system.classificationLabel || "Developing system")
+  var kind = systemKind(system)
+  if (kind === "earthquake") return earthquakeReviewLabel(system)
+  if (kind === "outlook") return String(system.classificationLabel || "Developing system")
   return classificationLabel(system)
 }
 
 function systemMetric(system, useImperial) {
-  return systemKind(system) === "outlook"
-    ? outlookChanceLabel(system) : formatWind(system, useImperial)
+  var kind = systemKind(system)
+  if (kind === "earthquake") return formatDepth(system) + " · " + humanAge(system.occurredAt)
+  return kind === "outlook" ? outlookChanceLabel(system) : formatWind(system, useImperial)
 }
 
 function discussionExcerpt(system) {
+  if (systemKind(system) === "earthquake") return earthquakeNarrative(system)
   return String(system && system.discussionExcerpt || "")
+}
+
+function earthquakeNarrative(earthquake) {
+  if (!earthquake) return ""
+  var review = earthquakeReviewLabel(earthquake).toLowerCase()
+  var parts = ["USGS reports a " + review + " at " + formatDepth(earthquake) + "."]
+  var shaking = formatMaximumIntensity(earthquake)
+  if (shaking !== "Unavailable") parts.push("Maximum shaking: " + shaking + ".")
+  var felt = formatFeltReports(earthquake)
+  if (felt !== "Unavailable") parts.push("Felt reports: " + felt + ".")
+  if (String(earthquake.pagerAlert || "")) parts.push(earthquakeImpactLabel(earthquake) + " impact estimate.")
+  if (earthquake.tsunamiInfo === true)
+    parts.push("Tsunami information is available from NOAA; the USGS flag is not a warning.")
+  return parts.join(" ")
 }
 
 function groupedInteger(value) {
@@ -502,7 +875,10 @@ function safeOfficialUrl(value) {
   var slash = rest.indexOf("/")
   var host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase()
   if (host.indexOf("@") !== -1 || host.indexOf(":") !== -1) return ""
-  return ["nhc.noaa.gov", "www.nhc.noaa.gov", "hurricanes.gov", "www.hurricanes.gov"].indexOf(host) !== -1 ? url : ""
+  return [
+    "nhc.noaa.gov", "www.nhc.noaa.gov", "hurricanes.gov", "www.hurricanes.gov",
+    "earthquake.usgs.gov", "www.tsunami.gov", "tsunami.gov"
+  ].indexOf(host) !== -1 ? url : ""
 }
 
 function activeSummary(storms) {
@@ -522,6 +898,12 @@ function trackingSummary(storms, outlooks) {
   if (active.length > 0) parts.push(active.length + (active.length === 1 ? " active cyclone" : " active cyclones"))
   if (developing.length > 0) parts.push(developing.length + (developing.length === 1 ? " outlook area" : " outlook areas"))
   return parts.join(" · ")
+}
+
+function earthquakeSummary(earthquakes) {
+  var rows = Array.isArray(earthquakes) ? earthquakes : []
+  if (rows.length === 0) return "No M4.5+ earthquakes in the past week"
+  return rows.length + (rows.length === 1 ? " M4.5+ earthquake" : " M4.5+ earthquakes") + " in the past week"
 }
 
 var EARTH_RADIUS_KM = 6371.0088

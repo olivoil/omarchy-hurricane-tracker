@@ -1,13 +1,14 @@
-# Hurricane Tracker
+# Hurricane + Earthquake Tracker
 
-Hurricane Tracker adds a tropical-weather icon to your Omarchy bar. Open it to
-see what the National Hurricane Center (NHC) is tracking: active storms,
-forecast paths, uncertainty cones, and areas that may develop.
+Hurricane + Earthquake Tracker adds a live-hazards icon to your Omarchy bar.
+Open it to switch between National Hurricane Center (NHC) tropical activity
+and recent worldwide earthquakes from the USGS Earthquake Hazards Program.
 
 ![Hurricane Tracker showing Tropical Storm Karina's forecast cone, nearby systems, and NHC forecast discussion](preview.png)
 
-The plugin covers the Atlantic, Eastern Pacific, and Central Pacific basins. It
-does not currently include storms tracked by the JTWC or other agencies.
+Tropical coverage spans the Atlantic, Eastern Pacific, and Central Pacific
+basins; it does not include storms tracked only by the JTWC or other agencies.
+Earthquake coverage is worldwide for events in the selected USGS weekly feed.
 
 ## Features
 
@@ -19,9 +20,15 @@ does not currently include storms tracked by the JTWC or other agencies.
 - Excerpts from the latest NHC discussions, with links to the full advisories
 - Optional notifications for new cyclones and rising formation chances
 - A global Alerts destination for locally saved locations and proximity notifications
+- A removable default alert based on the user's Omarchy weather location
+- A whole-globe opening flight that rotates and settles on that default location
 - Typed city, region, and postal-code search while positioning an alert destination
 - Keyboard navigation, map controls, and support for reduced motion
 - Cached data when the NHC is temporarily unavailable
+- Worldwide magnitude 4.5+ earthquakes from the past seven days
+- Magnitude-scaled map markers, depth, shaking, felt reports, and USGS PAGER impact
+- Sticky, collapsible earthquake time buckets with faster mouse-wheel paging
+- Independent NHC and USGS refresh schedules and caches
 
 The map is rendered locally in QML using bundled Natural Earth geometry. The
 plugin does not need an API key or extra Python packages, and it does not
@@ -29,25 +36,28 @@ install a background daemon.
 
 ## Install
 
-Hurricane Tracker requires Omarchy Quattro with Quickshell plugin support and
+Hurricane + Earthquake Tracker requires Omarchy Quattro with Quickshell plugin support and
 Python 3.
 
 ```bash
 omarchy plugin add https://github.com/olivoil/omarchy-hurricane-tracker.git --enable
 ```
 
-Once enabled, open it from `Super+Space` by searching for **Hurricane Tracker**.
+Once enabled, open it from `Super+Space` by searching for
+**Hurricane + Earthquake Tracker**.
 The plugin removes its launcher entry when it is disabled or uninstalled.
 
-It also needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` to download
-advisories and outlooks. Typed place search uses
+It needs HTTPS access to `nhc.noaa.gov` and `www.nhc.noaa.gov` for tropical
+advisories and to `earthquake.usgs.gov` for the official M4.5+ weekly GeoJSON
+feed. Typed place search uses
 `geocoding-api.open-meteo.com`; map placement still works when online place
-search is disabled.
+search is disabled. When Omarchy has no saved weather coordinates, the one-time
+default alert can use `wttr.in` to resolve a coarse IP-based city.
 
 ## Settings and notifications
 
-Hurricane Tracker checks for new NHC data every 15 minutes by default. You can
-change the interval in Omarchy's bar settings.
+The tracker checks NHC data every 15 minutes and USGS earthquake data every
+five minutes by default. Both intervals can be changed in Omarchy's bar settings.
 
 Distances and speeds automatically follow the system measurement convention
 inherited from Omarchy: miles and mph for imperial locales, kilometres and
@@ -63,6 +73,13 @@ Broad basin notifications are off until you choose a basin. You can be notified 
 Alerts can cover the Atlantic, Eastern Pacific, Central Pacific, or all three.
 When you turn them on, existing systems are treated as the starting point, so
 you will not get a burst of notifications for storms already underway.
+
+On first use, the tracker adds the Omarchy weather location as a default alert.
+Saved weather coordinates are reused locally. If only a weather name is saved,
+or Omarchy is using automatic weather location, **Online place lookup** allows
+one lookup to resolve the initial coordinate. The default behaves like any
+other alert: it can be edited or removed, and removal is remembered so it is
+not recreated later.
 
 Open **Alerts** in the app header to save up to 12 locations such as home,
 family, or a destination. Search for a city, region, or postal code, or click
@@ -88,34 +105,39 @@ coverage is limited to NHC basins; a place elsewhere remains saved but is
 marked as outside the current source coverage.
 
 Online place lookup waits until typing pauses, then sends only the geographic
-search text to Open-Meteo. Choosing a point on the globe sends that coordinate
-to OpenStreetMap's Nominatim service once to suggest a nearby place name.
-Personal labels, saved watch-place lists, and alert radii are never included.
-Turn off **Online place lookup** in the plugin settings to keep globe placement
-entirely local; coordinate labels remain available as a fallback.
+search text to Open-Meteo. For the one-time default, a configured weather name
+uses the same search; with no configured location, wttr.in receives a fixed
+request and returns a coarse IP-based city and coordinate. Choosing a point on
+the globe sends that coordinate to OpenStreetMap's Nominatim service once to
+suggest a nearby place name. Personal labels, saved watch-place lists, and
+alert radii are never included. Turn off **Online place lookup** before the
+default is initialized to prevent the IP-based request; exact coordinates
+already stored by Omarchy can still be reused locally.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| Left-click the bar icon | Open or close Hurricane Tracker |
-| Middle-click the bar icon | Refresh NHC data |
-| Right-click the bar icon | Open the NHC website |
-| Click **Cyclones** | Open the tracker menu |
+| Left-click the bar icon | Open or close the tracker |
+| Middle-click the bar icon | Refresh NHC and USGS data |
+| Right-click the bar icon | Open the most relevant official source |
+| Click **Cyclones** or **Earthquakes** | Open the tracker menu |
 | Click **Alerts** | View, add, edit, or remove watched locations |
 | Click a system or map marker | Select it and fit it on the map |
 | Click **View all** beside a basin | Fit every system in that always-open basin on the map |
 | Click a watched location | Select it and fit it on the map |
 | Click the map while adding a location | Set or move the watch point |
 | Drag the map | Move around the globe |
-| Mouse wheel | Zoom at the pointer |
+| Mouse wheel over the map | Zoom at the pointer |
+| Mouse wheel over the earthquake list | Page quickly with a mouse wheel; touchpad scrolling stays precise |
 | Up / Down | Select the previous or next system |
 | `+` / `-` | Zoom in or out |
 | `F` | Fit the selected system |
 | `G` or `0` | Show the whole globe |
 | `R` | Refresh |
-| `O` | Open the selected system's official advisory |
-| Escape | Close the current menu or alert view, then close Hurricane Tracker |
+| `O` | Open the selected system's official source page |
+| Page Up / Page Down / Home / End | Move quickly through the activity list |
+| Escape | Close the current menu or alert view, then close the tracker |
 
 ## Data and safety
 
@@ -126,9 +148,17 @@ preliminary best tracks. Formation areas and probabilities come from the NHC's
 Graphical Tropical Weather Outlook products. It also fetches the linked text
 products for forecast discussion excerpts.
 
-Cyclone requests are limited to NHC-owned HTTPS hosts. Place lookups use only
-Open-Meteo's fixed HTTPS search endpoint and OpenStreetMap Nominatim's fixed
-HTTPS reverse endpoint. All interfaces refuse redirects and non-success
+Earthquake activity comes from the USGS
+[`4.5_week.geojson`](https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson)
+summary feed. Only features identified as earthquakes with valid coordinates,
+times, depths, and magnitudes are shown. PAGER colors are impact estimates, not
+local warnings; a tsunami-information flag points users back to official guidance.
+
+Cyclone requests are limited to NHC-owned HTTPS hosts, and earthquake requests
+to `earthquake.usgs.gov`. Place lookups use only Open-Meteo's fixed HTTPS
+search endpoint, OpenStreetMap Nominatim's fixed HTTPS reverse endpoint, and
+wttr.in's fixed JSON endpoint for the one-time coarse location. All interfaces
+refuse redirects and non-success
 responses and enforce streaming response limits before parsing. Place-name
 responses are capped at 64 KiB, Open-Meteo results are capped at eight, and
 remote display fields and coordinates are validated again before QML renders
@@ -141,13 +171,14 @@ Location results are provided by
 Map-click place names are provided by
 [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) through
 [Nominatim](https://nominatim.org/release-docs/latest/api/Reverse/).
+Coarse automatic city detection is provided by [wttr.in](https://wttr.in/).
 
-The latest data is cached at `~/.cache/hurricane-tracker/storms.json`. If you
-have set `$XDG_CACHE_HOME`, the cache is stored in
-`$XDG_CACHE_HOME/hurricane-tracker/storms.json` instead. It contains public
-weather data only.
+The latest public data is cached independently at
+`~/.cache/hurricane-tracker/storms.json` and
+`~/.cache/hurricane-tracker/earthquakes.json`. If `$XDG_CACHE_HOME` is set,
+the same `hurricane-tracker` directory is used there instead.
 
-> Hurricane Tracker is an awareness tool, not an emergency warning system. The
+> This tracker is an awareness tool, not an emergency warning system. The
 > forecast cone shows the probable path of the storm's center; dangerous wind,
 > rain, storm surge, and tornadoes can occur well outside it. Follow guidance
 > from local authorities and official weather services.
@@ -170,8 +201,9 @@ cache; later updates preserve the cache at the path above.
 omarchy plugin remove io.github.olivoil.hurricane-tracker
 ```
 
-Omarchy leaves cached weather data and saved watch places behind. If you want to
-remove them as well, delete `~/.cache/hurricane-tracker/storms.json` and
+Omarchy leaves cached public data and saved watch places behind. If you want to
+remove them as well, delete `~/.cache/hurricane-tracker/storms.json`,
+`~/.cache/hurricane-tracker/earthquakes.json`, and
 `~/.config/hurricane-tracker/watch-places.json`, or their equivalents under
 your custom XDG directories.
 
@@ -198,7 +230,7 @@ overview of the data pipeline and UI.
 
 ## License
 
-Hurricane Tracker is licensed under the MIT License. The bundled Natural Earth
+Hurricane + Earthquake Tracker is licensed under the MIT License. The bundled Natural Earth
 geometry is public domain; see
 [`assets/NATURAL_EARTH.md`](assets/NATURAL_EARTH.md) and
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for details.
