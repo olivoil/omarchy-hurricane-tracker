@@ -215,6 +215,55 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("motionEnabled:", map_wiring)
         self.assertIn("root.tracker.motionEnabled", map_wiring)
 
+    def test_tracker_switch_preserves_the_current_map_viewport(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        activate_tracker = overlay.split("function activateTracker(identifier)", 1)[1].split(
+            "function syncSelection", 1
+        )[0]
+        schedule_fit = storm_map.split("function scheduleFitSelected(force)", 1)[1].split(
+            "function showGlobe", 1
+        )[0]
+        mode_change = storm_map.split("onModeChanged:", 1)[1].split(
+            "onSelectedKeyChanged:", 1
+        )[0]
+
+        self.assertIn("property bool layerSwitchInProgress: false", storm_map)
+        self.assertIn("property real cameraOffsetY: 0", storm_map)
+        self.assertIn("property real layerSwitchMapCenterY: 0", storm_map)
+        self.assertIn("property real layerSwitchGlobeRadius: 0", storm_map)
+        self.assertIn("readonly property real mapCenterY: layerSwitchInProgress", storm_map)
+        self.assertIn("? layerSwitchMapCenterY : viewHeight / 2 + cameraOffsetY", storm_map)
+        self.assertIn("readonly property real globeRadius: layerSwitchInProgress", storm_map)
+        self.assertIn("? layerSwitchGlobeRadius : baseGlobeRadius * zoom", storm_map)
+        self.assertIn("function beginLayerSwitch()", storm_map)
+        self.assertIn("function finishLayerSwitch()", storm_map)
+        begin_switch = storm_map.split("function beginLayerSwitch()", 1)[1].split(
+            "function finishLayerSwitch()", 1
+        )[0]
+        finish_switch = storm_map.split("function finishLayerSwitch()", 1)[1].split(
+            "function stopMomentum()", 1
+        )[0]
+        self.assertIn("layerSwitchMapCenterY = mapCenterY", begin_switch)
+        self.assertIn("layerSwitchGlobeRadius = globeRadius", begin_switch)
+        self.assertLess(
+            begin_switch.index("layerSwitchGlobeRadius = globeRadius"),
+            begin_switch.index("layerSwitchInProgress = true"),
+        )
+        self.assertIn("cameraOffsetY = layerSwitchMapCenterY - viewHeight / 2", finish_switch)
+        self.assertIn("zoom = layerSwitchGlobeRadius / baseGlobeRadius", finish_switch)
+        self.assertLess(
+            activate_tracker.index("stormMap.beginLayerSwitch()"),
+            activate_tracker.index("activeTrackerId = id"),
+        )
+        self.assertIn("stormMap.finishLayerSwitch()", activate_tracker)
+        self.assertIn("if (layerSwitchInProgress) return", schedule_fit)
+        self.assertIn("root.layerSwitchInProgress", schedule_fit)
+        self.assertIn(
+            "if (!layerSwitchInProgress) scheduleFitSelected(true)",
+            mode_change,
+        )
+
     def test_navigation_shell_keeps_alerts_global_and_trackers_extensible(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         self.assertIn('property bool trackerMenuOpen: false', overlay)

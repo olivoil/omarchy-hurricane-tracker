@@ -456,6 +456,7 @@ Item {
     for (var i = 0; i < trackerDefinitions.length; i++) {
       var definition = trackerDefinitions[i]
       if (definition.id !== id || !definition.available) continue
+      stormMap.beginLayerSwitch()
       if (activeTrackerId === "earthquakes") earthquakeSelection = selectedKey
       else cycloneSelection = selectedKey
       activeTrackerId = id
@@ -463,7 +464,10 @@ Item {
       regionOverviewBasin = ""
       sidebarMode = "activity"
       trackerMenuOpen = false
-      Qt.callLater(function() { root.syncSelection(true) })
+      Qt.callLater(function() {
+        root.syncSelection(true)
+        Qt.callLater(function() { stormMap.finishLayerSwitch() })
+      })
       keyCatcher.forceActiveFocus()
       return
     }

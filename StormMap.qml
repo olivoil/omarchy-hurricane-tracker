@@ -18,6 +18,7 @@ Item {
   property bool useImperial: false
   property bool preferOverview: false
   property bool motionEnabled: false
+  property bool layerSwitchInProgress: false
   readonly property var systems: mode === "earthquakes"
     ? Model.orderedEarthquakes(earthquakes) : Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
@@ -30,14 +31,21 @@ Item {
   property real maximumZoom: 32
   property real bottomInset: 0
   property bool userMoved: false
+  property real cameraOffsetY: 0
+  property real layerSwitchLatitude: 0
+  property real layerSwitchLongitude: 0
+  property real layerSwitchMapCenterY: 0
+  property real layerSwitchGlobeRadius: 0
   property real openingFlightTargetLongitude: 0
   property var openingArrivalPlace: null
   readonly property bool openingFlightRunning: openingFlight.running
   readonly property real viewHeight: Math.max(1, height - bottomInset)
   readonly property real mapCenterX: width / 2
-  readonly property real mapCenterY: viewHeight / 2
+  readonly property real mapCenterY: layerSwitchInProgress
+    ? layerSwitchMapCenterY : viewHeight / 2 + cameraOffsetY
   readonly property real baseGlobeRadius: Math.max(80, Math.min(width, viewHeight) * 0.43)
-  readonly property real globeRadius: baseGlobeRadius * zoom
+  readonly property real globeRadius: layerSwitchInProgress
+    ? layerSwitchGlobeRadius : baseGlobeRadius * zoom
   readonly property bool wholeGlobeVisible: globeRadius <= Math.min(width, viewHeight) / 2 - 8
 
   property color oceanColor: "#102f38"
@@ -109,6 +117,7 @@ Item {
 
   function applyBounds(bounds, coordinates, minimum) {
     cancelOpeningFlight()
+    cameraOffsetY = 0
     var fit = Model.orthographicFit(coordinates, bounds)
     centreLatitude = fit.centreLatitude
     centreLongitude = fit.centreLongitude
@@ -153,11 +162,33 @@ Item {
     cancelOpeningFlight()
     var focus = Model.watchPlaceFocus(place, zoom, minimumZoom, maximumZoom)
     if (!focus) return
+    cameraOffsetY = 0
     centreLatitude = focus.centreLatitude
     centreLongitude = focus.centreLongitude
     zoom = focus.zoom
     userMoved = true
     clearHover()
+    canvas.requestPaint()
+  }
+
+  function beginLayerSwitch() {
+    cancelOpeningFlight()
+    layerSwitchLatitude = centreLatitude
+    layerSwitchLongitude = centreLongitude
+    layerSwitchMapCenterY = mapCenterY
+    layerSwitchGlobeRadius = globeRadius
+    layerSwitchInProgress = true
+    clearHover()
+    canvas.requestPaint()
+  }
+
+  function finishLayerSwitch() {
+    centreLatitude = layerSwitchLatitude
+    centreLongitude = layerSwitchLongitude
+    cameraOffsetY = layerSwitchMapCenterY - viewHeight / 2
+    if (baseGlobeRadius > 0)
+      zoom = layerSwitchGlobeRadius / baseGlobeRadius
+    layerSwitchInProgress = false
     canvas.requestPaint()
   }
 
@@ -210,6 +241,7 @@ Item {
     var normalized = Model.normalizeWatchPlace(place)
     if (width < 40 || height < 40 || !normalized) return false
     cancelOpeningFlight()
+    cameraOffsetY = 0
     openingArrivalPlace = normalized
     var focus = Model.watchPlaceFocus(
       normalized, minimumZoom, minimumZoom, maximumZoom)
@@ -244,9 +276,11 @@ Item {
   }
 
   function scheduleFitSelected(force) {
+    if (layerSwitchInProgress) return
     var forceFit = force === true
     if (!autoFitSelection || openingFlight.running || (!forceFit && userMoved)) return
     Qt.callLater(function() {
+      if (root.layerSwitchInProgress) return
       if (!root.autoFitSelection || openingFlight.running
           || (!forceFit && root.userMoved)) return
       root.syncSelectionView()
@@ -255,6 +289,7 @@ Item {
 
   function showGlobe(basin) {
     cancelOpeningFlight()
+    cameraOffsetY = 0
     if (basin) {
       var bounds = Model.regionBounds(storms, outlooks, basin)
       centreLatitude = bounds.centreLatitude
@@ -1147,7 +1182,7 @@ Item {
     cancelOpeningFlight()
     clearHover()
     canvas.requestPaint()
-    scheduleFitSelected(true)
+    if (!layerSwitchInProgress) scheduleFitSelected(true)
   }
   onSelectedKeyChanged: scheduleFitSelected(true)
   onPreferOverviewChanged: if (mode === "earthquakes") scheduleFitSelected(true)
