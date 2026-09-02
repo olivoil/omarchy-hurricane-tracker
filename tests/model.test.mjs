@@ -19,6 +19,43 @@ assert.equal(model.wheelScrollDistance(0, 120, 272), -272)
 assert.equal(model.wheelScrollDistance(0, -60, 272), 136)
 assert.equal(model.wheelScrollDistance(0, 0, 272), 0)
 
+const sampledDragVelocity = model.dragVelocity(0, 16, 16)
+assert.ok(sampledDragVelocity > 300 && sampledDragVelocity < 500)
+assert.ok(model.dragVelocity(0, 200, 1) > 0)
+assert.ok(model.dragVelocity(0, 200, 1) <= 1800)
+assert.ok(model.dragVelocity(0, 16, 8) > model.dragVelocity(0, 16, 32))
+
+const oneMomentumFrame = model.dragMomentumStep(900, -420, 32)
+const firstMomentumFrame = model.dragMomentumStep(900, -420, 16)
+const secondMomentumFrame = model.dragMomentumStep(
+  firstMomentumFrame.velocityX,
+  firstMomentumFrame.velocityY,
+  16
+)
+assert.ok(Math.abs(
+  oneMomentumFrame.deltaX
+    - firstMomentumFrame.deltaX
+    - secondMomentumFrame.deltaX
+) < 1e-9)
+assert.ok(Math.abs(
+  oneMomentumFrame.deltaY
+    - firstMomentumFrame.deltaY
+    - secondMomentumFrame.deltaY
+) < 1e-9)
+assert.ok(Math.abs(
+  oneMomentumFrame.velocityX - secondMomentumFrame.velocityX
+) < 1e-9)
+assert.ok(Math.abs(
+  oneMomentumFrame.velocityY - secondMomentumFrame.velocityY
+) < 1e-9)
+assert.ok(oneMomentumFrame.velocityX < 900)
+assert.ok(oneMomentumFrame.velocityY > -420)
+assert.ok(
+  model.dragMomentumStep(900, 0, 16).deltaX
+    > model.dragMomentumStep(300, 0, 16).deltaX
+)
+assert.equal(model.dragMomentumStep(10, -8, 16).active, false)
+
 const storm = {
   id: "al012026",
   name: "Ada",

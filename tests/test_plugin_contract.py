@@ -192,6 +192,29 @@ class PluginContractTests(unittest.TestCase):
         self.assertNotIn("Easing.OutQuint", opening_flight)
         self.assertEqual(opening_flight.count("Easing.InOutSine"), 3)
 
+    def test_globe_drag_has_interruptible_reduced_motion_aware_momentum(self):
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+        map_wiring = overlay.split("StormMap {", 1)[1].split(
+            "BorderSurface {", 1
+        )[0]
+        pointer_input = storm_map.split("MouseArea {", 1)[1].split(
+            "Rectangle {", 1
+        )[0]
+
+        self.assertIn("property bool motionEnabled", storm_map)
+        self.assertIn("onMotionEnabledChanged:", storm_map)
+        self.assertIn("function stopMomentum()", storm_map)
+        self.assertIn("FrameAnimation {", storm_map)
+        self.assertIn("id: momentumAnimation", storm_map)
+        self.assertIn("Model.dragMomentumStep", storm_map)
+        self.assertIn("Model.dragVelocity", pointer_input)
+        self.assertIn("root.startMomentum()", pointer_input)
+        self.assertIn("interruptedMomentum = momentumAnimation.running", pointer_input)
+        self.assertIn("travel < 7 && !interruptedMomentum", pointer_input)
+        self.assertIn("motionEnabled:", map_wiring)
+        self.assertIn("root.tracker.motionEnabled", map_wiring)
+
     def test_navigation_shell_keeps_alerts_global_and_trackers_extensible(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         self.assertIn('property bool trackerMenuOpen: false', overlay)

@@ -13,6 +13,43 @@ function wheelScrollDistance(pixelDeltaY, angleDeltaY, discreteStep) {
   return -angle / 120 * step
 }
 
+function dragVelocity(previousVelocity, deltaPixels, elapsedMilliseconds) {
+  var previous = Number(previousVelocity)
+  if (!isFinite(previous)) previous = 0
+  var elapsed = Number(elapsedMilliseconds)
+  if (!isFinite(elapsed) || elapsed <= 0) return previous
+  elapsed = clamp(elapsed, 1, 64)
+  var instantaneous = clamp(Number(deltaPixels) * 1000 / elapsed, -1800, 1800)
+  if (!isFinite(instantaneous)) return previous
+  var blend = 1 - Math.exp(-elapsed / 32)
+  return clamp(previous + (instantaneous - previous) * blend, -1800, 1800)
+}
+
+// Exponential friction gives the same coast distance whether a frame arrives
+// on time or late. Distances are returned in screen pixels so momentum keeps
+// the same visual weight at every map zoom level.
+function dragMomentumStep(velocityX, velocityY, elapsedMilliseconds) {
+  var x = Number(velocityX)
+  var y = Number(velocityY)
+  if (!isFinite(x)) x = 0
+  if (!isFinite(y)) y = 0
+  var elapsed = Number(elapsedMilliseconds)
+  if (!isFinite(elapsed) || elapsed <= 0) elapsed = 0
+  var seconds = clamp(elapsed, 0, 50) / 1000
+  var friction = 4.8
+  var decay = Math.exp(-friction * seconds)
+  var travel = (1 - decay) / friction
+  var nextX = x * decay
+  var nextY = y * decay
+  return {
+    deltaX: x * travel,
+    deltaY: y * travel,
+    velocityX: nextX,
+    velocityY: nextY,
+    active: Math.hypot(nextX, nextY) >= 18
+  }
+}
+
 function wrapLongitude(value) {
   var wrapped = (Number(value) + 180) % 360
   if (wrapped < 0) wrapped += 360

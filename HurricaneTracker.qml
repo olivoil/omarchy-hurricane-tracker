@@ -1302,6 +1302,7 @@ Item {
           placementMode: root.sidebarMode === "alerts" && root.editingWatchPlace
           draftWatchPlace: root.draftWatchPlace
           useImperial: root.useImperial
+          motionEnabled: root.tracker && root.tracker.motionEnabled === true
           bottomInset: root.sidebarMode === "activity" && root.selectedStorm ? root.timelineHeight : 0
           oceanColor: root.mapOcean
           deepOceanColor: root.mapDeepOcean

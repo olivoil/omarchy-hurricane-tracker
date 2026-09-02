@@ -17,6 +17,7 @@ Item {
   property var draftWatchPlace: null
   property bool useImperial: false
   property bool preferOverview: false
+  property bool motionEnabled: false
   readonly property var systems: mode === "earthquakes"
     ? Model.orderedEarthquakes(earthquakes) : Model.orderedSystems(storms, outlooks)
   readonly property var selectedSystem: Model.systemByKey(systems, selectedKey)
@@ -160,7 +161,38 @@ Item {
     canvas.requestPaint()
   }
 
+  function stopMomentum() {
+    momentumAnimation.running = false
+    pointer.velocityX = 0
+    pointer.velocityY = 0
+  }
+
+  function finishMomentum() {
+    stopMomentum()
+    if (pointer.containsMouse && !pointer.pressed && !placementMode)
+      updateHover(pointer.mouseX, pointer.mouseY)
+  }
+
+  function startMomentum() {
+    if (!motionEnabled || pointer.travel < 7) {
+      stopMomentum()
+      return false
+    }
+    var sampleAge = Math.max(0, Date.now() - pointer.previousSampleTime)
+    var retention = Math.exp(-sampleAge / 80)
+    pointer.velocityX *= retention
+    pointer.velocityY *= retention
+    if (Math.hypot(pointer.velocityX, pointer.velocityY) < 18) {
+      stopMomentum()
+      return false
+    }
+    clearHover()
+    momentumAnimation.running = true
+    return true
+  }
+
   function cancelOpeningFlight() {
+    stopMomentum()
     var changed = false
     if (openingFlight.running) {
       openingFlight.stop()
@@ -923,6 +955,38 @@ Item {
     onPaint: root.paint(getContext("2d"))
   }
 
+  FrameAnimation {
+    id: momentumAnimation
+    running: false
+
+    onTriggered: {
+      if (!root.motionEnabled || pointer.pressed || !root.visible) {
+        root.stopMomentum()
+        return
+      }
+      var elapsed = Math.max(1, frameTime * 1000)
+      var step = Model.dragMomentumStep(pointer.velocityX, pointer.velocityY, elapsed)
+      pointer.velocityX = step.velocityX
+      pointer.velocityY = step.velocityY
+
+      var latitudeDegreesPerPixel = 57.2957795 / root.globeRadius
+      var longitudeDegreesPerPixel = latitudeDegreesPerPixel
+        / Math.max(0.28, Math.cos(root.centreLatitude * Math.PI / 180))
+      root.centreLongitude = Model.wrapLongitude(
+        root.centreLongitude - step.deltaX * longitudeDegreesPerPixel)
+      var unclampedLatitude = root.centreLatitude
+        + step.deltaY * latitudeDegreesPerPixel
+      var nextLatitude = Model.clamp(unclampedLatitude, -82, 82)
+      root.centreLatitude = nextLatitude
+      if (Math.abs(unclampedLatitude - nextLatitude) > 0.000001)
+        pointer.velocityY = 0
+      root.userMoved = true
+
+      if (!step.active || Math.hypot(pointer.velocityX, pointer.velocityY) < 18)
+        root.finishMomentum()
+    }
+  }
+
   MouseArea {
     id: pointer
     anchors.fill: parent
@@ -935,19 +999,34 @@ Item {
     property real previousX: 0
     property real previousY: 0
     property real travel: 0
+    property real velocityX: 0
+    property real velocityY: 0
+    property double previousSampleTime: 0
+    property bool interruptedMomentum: false
 
     onPressed: function(mouse) {
+      interruptedMomentum = momentumAnimation.running
       root.cancelOpeningFlight()
       previousX = mouse.x
       previousY = mouse.y
       travel = 0
+      velocityX = 0
+      velocityY = 0
+      previousSampleTime = Date.now()
       root.pointerActivity()
     }
     onPositionChanged: function(mouse) {
       if (pressed) {
         var dx = mouse.x - previousX
         var dy = mouse.y - previousY
+        var now = Date.now()
+        var elapsed = now - previousSampleTime
         travel += Math.abs(dx) + Math.abs(dy)
+        if (elapsed > 0 && (dx !== 0 || dy !== 0)) {
+          velocityX = Model.dragVelocity(velocityX, dx, elapsed)
+          velocityY = Model.dragVelocity(velocityY, dy, elapsed)
+          previousSampleTime = now
+        }
         var latitudeDegreesPerPixel = 57.2957795 / root.globeRadius
         var longitudeDegreesPerPixel = latitudeDegreesPerPixel
           / Math.max(0.28, Math.cos(root.centreLatitude * Math.PI / 180))
@@ -964,7 +1043,7 @@ Item {
       root.pointerActivity()
     }
     onReleased: function(mouse) {
-      if (travel < 7) {
+      if (travel < 7 && !interruptedMomentum) {
         if (root.placementMode) {
           var coordinate = root.unproject(mouse.x, mouse.y)
           if (coordinate) root.placePicked(coordinate.latitude, coordinate.longitude)
@@ -975,7 +1054,14 @@ Item {
           else if (place) root.placeActivated(place.id)
         }
       }
-      if (!root.placementMode) root.updateHover(mouse.x, mouse.y)
+      var momentumStarted = root.startMomentum()
+      if (!momentumStarted && !root.placementMode)
+        root.updateHover(mouse.x, mouse.y)
+      interruptedMomentum = false
+    }
+    onCanceled: {
+      interruptedMomentum = false
+      root.stopMomentum()
     }
     onExited: {
       if (!pressed) root.clearHover()
@@ -1080,5 +1166,7 @@ Item {
   onOceanColorChanged: canvas.requestPaint()
   onLandColorChanged: canvas.requestPaint()
   onConeColorChanged: canvas.requestPaint()
+  onMotionEnabledChanged: if (!motionEnabled) stopMomentum()
+  onVisibleChanged: if (!visible) stopMomentum()
   Component.onCompleted: scheduleFitSelected(true)
 }
