@@ -77,10 +77,14 @@ class PluginContractTests(unittest.TestCase):
         country_paint = storm_map.split("function paintCountryRing", 1)[1].split(
             "function drawCountries", 1
         )[0]
+        fragment_paint = storm_map.split(
+            "function paintGeoFragments(context, fragments)", 1
+        )[1].split("function paintGeoRing", 1)[0]
 
         self.assertIn("Model.clippedPreparedHemisphereRings", country_paint)
-        self.assertIn("fragment.boundaryLength", country_paint)
-        self.assertIn("if (!fragment.clipped) context.closePath()", country_paint)
+        self.assertIn("paintGeoFragments", country_paint)
+        self.assertIn("fragment.boundaryLength", fragment_paint)
+        self.assertIn("if (!fragment.clipped) context.closePath()", fragment_paint)
         self.assertNotIn("allVisible", country_paint)
 
     def test_country_geometry_is_prepared_once_instead_of_during_each_paint(self):
@@ -96,6 +100,32 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("function prepareCountryGeometry", storm_map)
         self.assertIn("Model.clippedPreparedHemisphereRings", country_paint)
         self.assertIn("preparedCountryRings", country_draw)
+
+    def test_hazard_outlines_exclude_synthetic_horizon_closures(self):
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        self.assertIn("function paintGeoFragments(context, fragments)", storm_map)
+        fragment_paint = storm_map.split(
+            "function paintGeoFragments(context, fragments)", 1
+        )[1].split("function paintGeoRing", 1)[0]
+        self.assertIn("boundaryIndex < fragment.boundaryLength", fragment_paint)
+        self.assertIn("if (!fragment.clipped) context.closePath()", fragment_paint)
+
+        watch_place = storm_map.split("function drawWatchPlace", 1)[1].split(
+            "function drawOpeningArrival", 1
+        )[0]
+        cone = storm_map.split("function drawCone", 1)[1].split(
+            "function drawPath", 1
+        )[0]
+        outlook = storm_map.split("function drawOutlook(context", 1)[1].split(
+            "function earthquakeRadius", 1
+        )[0]
+        self.assertIn("paintGeoRing(context, ring)", watch_place)
+        self.assertIn("paintGeoRing(context, rings[i])", cone)
+        self.assertIn("paintGeoRing(context, rings[r])", outlook)
+        self.assertNotIn("beginGeoPath(context, ring, true)", watch_place)
+        self.assertNotIn("beginGeoPath(context, rings[i], true)", cone)
+        self.assertNotIn("beginGeoPath(context, rings[r], true)", outlook)
 
     def test_outlook_connectors_are_drawn_as_directional_links(self):
         storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")

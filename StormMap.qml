@@ -434,30 +434,9 @@ Item {
     canvas.requestPaint()
   }
 
-  function beginGeoPath(context, coordinates, closePath) {
+  function beginGeoPath(context, coordinates) {
     var rows = Array.isArray(coordinates) ? coordinates : []
     if (rows.length === 0) return false
-    if (closePath) {
-      var fragments = Model.clippedHemisphereRings(
-        rows, centreLatitude, centreLongitude)
-      var anyFragment = false
-      context.beginPath()
-      for (var fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
-        var fragmentPoints = fragments[fragmentIndex].points
-        if (!Array.isArray(fragmentPoints) || fragmentPoints.length < 3) continue
-        for (var fragmentPointIndex = 0;
-            fragmentPointIndex < fragmentPoints.length; fragmentPointIndex++) {
-          var spherePoint = fragmentPoints[fragmentPointIndex]
-          var fragmentX = mapCenterX + spherePoint.x * globeRadius
-          var fragmentY = mapCenterY - spherePoint.y * globeRadius
-          if (fragmentPointIndex === 0) context.moveTo(fragmentX, fragmentY)
-          else context.lineTo(fragmentX, fragmentY)
-        }
-        context.closePath()
-        anyFragment = true
-      }
-      return anyFragment
-    }
     var previousLongitude = Model.longitudeNear(centreLongitude, coordinateLongitude(rows[0]))
     var started = false
     context.beginPath()
@@ -476,6 +455,48 @@ Item {
       }
     }
     return started
+  }
+
+  function paintGeoFragments(context, fragments) {
+    var anyFragment = false
+    var rows = Array.isArray(fragments) ? fragments : []
+    for (var fragmentIndex = 0; fragmentIndex < rows.length; fragmentIndex++) {
+      var fragment = rows[fragmentIndex]
+      var points = fragment && fragment.points
+      if (!Array.isArray(points) || points.length < 3) continue
+
+      context.beginPath()
+      for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
+        var point = points[pointIndex]
+        var x = mapCenterX + point.x * globeRadius
+        var y = mapCenterY - point.y * globeRadius
+        if (pointIndex === 0) context.moveTo(x, y)
+        else context.lineTo(x, y)
+      }
+      context.closePath()
+      context.fill()
+
+      context.beginPath()
+      for (var boundaryIndex = 0;
+          boundaryIndex < fragment.boundaryLength; boundaryIndex++) {
+        var boundaryPoint = points[boundaryIndex]
+        var boundaryX = mapCenterX + boundaryPoint.x * globeRadius
+        var boundaryY = mapCenterY - boundaryPoint.y * globeRadius
+        if (boundaryIndex === 0) context.moveTo(boundaryX, boundaryY)
+        else context.lineTo(boundaryX, boundaryY)
+      }
+      if (!fragment.clipped) context.closePath()
+      context.stroke()
+      anyFragment = true
+    }
+    return anyFragment
+  }
+
+  function paintGeoRing(context, coordinates) {
+    var rows = Array.isArray(coordinates) ? coordinates : []
+    if (rows.length < 3) return false
+    return paintGeoFragments(context, Model.clippedHemisphereRings(
+      rows, centreLatitude, centreLongitude))
   }
 
   function drawBackground(context) {
@@ -505,12 +526,12 @@ Item {
     for (var longitude = -180; longitude < 180; longitude += spacing) {
       var meridian = []
       for (var latitude = -90; latitude <= 90; latitude += 3) meridian.push([longitude, latitude])
-      if (beginGeoPath(context, meridian, false)) context.stroke()
+      if (beginGeoPath(context, meridian)) context.stroke()
     }
     for (var parallel = -60; parallel <= 60; parallel += spacing) {
       var latitudeLine = []
       for (var lon = -180; lon <= 180; lon += 4) latitudeLine.push([lon, parallel])
-      if (beginGeoPath(context, latitudeLine, false)) context.stroke()
+      if (beginGeoPath(context, latitudeLine)) context.stroke()
     }
   }
 
@@ -531,35 +552,8 @@ Item {
   }
 
   function paintCountryRing(context, preparedRing) {
-    var fragments = Model.clippedPreparedHemisphereRings(
-      preparedRing, centreLatitude, centreLongitude)
-    for (var fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
-      var fragment = fragments[fragmentIndex]
-      var points = fragment.points
-      if (!Array.isArray(points) || points.length < 3) continue
-      context.beginPath()
-      for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
-        var point = points[pointIndex]
-        var x = mapCenterX + point.x * globeRadius
-        var y = mapCenterY - point.y * globeRadius
-        if (pointIndex === 0) context.moveTo(x, y)
-        else context.lineTo(x, y)
-      }
-      context.closePath()
-      context.fill()
-
-      context.beginPath()
-      for (var boundaryIndex = 0;
-          boundaryIndex < fragment.boundaryLength; boundaryIndex++) {
-        var boundaryPoint = points[boundaryIndex]
-        var boundaryX = mapCenterX + boundaryPoint.x * globeRadius
-        var boundaryY = mapCenterY - boundaryPoint.y * globeRadius
-        if (boundaryIndex === 0) context.moveTo(boundaryX, boundaryY)
-        else context.lineTo(boundaryX, boundaryY)
-      }
-      if (!fragment.clipped) context.closePath()
-      context.stroke()
-    }
+    paintGeoFragments(context, Model.clippedPreparedHemisphereRings(
+      preparedRing, centreLatitude, centreLongitude))
   }
 
   function drawCountries(context) {
@@ -602,10 +596,7 @@ Item {
       context.fillStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.055)
       context.lineWidth = 1.6
       if (context.setLineDash) context.setLineDash([3, 4])
-      if (beginGeoPath(context, ring, true)) {
-        context.fill()
-        context.stroke()
-      }
+      paintGeoRing(context, ring)
       if (context.setLineDash) context.setLineDash([])
     }
 
@@ -664,15 +655,11 @@ Item {
     context.fillStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.22)
     context.strokeStyle = Qt.rgba(coneColor.r, coneColor.g, coneColor.b, 0.88)
     context.lineWidth = 1.4
-    for (var i = 0; i < rings.length; i++) {
-      if (!beginGeoPath(context, rings[i], true)) continue
-      context.fill()
-      context.stroke()
-    }
+    for (var i = 0; i < rings.length; i++) paintGeoRing(context, rings[i])
   }
 
   function drawPath(context, rows, color, widthValue, dashed) {
-    if (!Array.isArray(rows) || rows.length < 2 || !beginGeoPath(context, rows, false)) return
+    if (!Array.isArray(rows) || rows.length < 2 || !beginGeoPath(context, rows)) return
     context.strokeStyle = color
     context.lineWidth = widthValue
     context.lineCap = "round"
@@ -758,11 +745,7 @@ Item {
     context.strokeStyle = Qt.rgba(color.r, color.g, color.b, selected ? 0.96 : 0.62)
     context.lineWidth = selected ? 2 : 1.2
     if (context.setLineDash) context.setLineDash(selected ? [7, 5] : [4, 6])
-    for (var r = 0; r < rings.length; r++) {
-      if (!beginGeoPath(context, rings[r], true)) continue
-      context.fill()
-      context.stroke()
-    }
+    for (var r = 0; r < rings.length; r++) paintGeoRing(context, rings[r])
     if (context.setLineDash) context.setLineDash([])
     drawOutlookConnector(context, outlook, color, selected)
 
