@@ -164,6 +164,35 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("Easing.InOutSine", storm_map)
         self.assertIn("root.cancelOpeningFlight()", storm_map)
 
+    def test_default_location_arrival_waits_for_lookup_and_clears_its_marker(self):
+        service = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
+        storm_map = (ROOT / "StormMap.qml").read_text(encoding="utf-8")
+
+        apply_motion = service.split("function applyMotionPreference(raw)", 1)[1].split(
+            "function normalizedPlaceSearchQuery", 1
+        )[0]
+        self.assertIn("Model.motionPreferenceValue(raw)", apply_motion)
+
+        timeout = overlay.split("id: openingLocationTimeout", 1)[1].split(
+            "PanelWindow", 1
+        )[0]
+        self.assertIn("interval: 6500", timeout)
+        self.assertIn("root.defaultLocationLoading", timeout)
+        self.assertIn("openingLocationTimeout.restart()", timeout)
+
+        begin_flight = storm_map.split("function beginOpeningFlight(place, animate)", 1)[1].split(
+            "function scheduleFitSelected", 1
+        )[0]
+        reduced_motion = begin_flight.split("if (animate !== true)", 1)[1].split(
+            "var startLatitude", 1
+        )[0]
+        animation_finished = storm_map.split("id: openingFlight", 1)[1].split(
+            "FileView", 1
+        )[0]
+        self.assertIn("openingArrivalPlace = null", reduced_motion)
+        self.assertIn("root.openingArrivalPlace = null", animation_finished)
+
     def test_plain_open_starts_with_no_selected_system(self):
         overlay = (ROOT / "HurricaneTracker.qml").read_text(encoding="utf-8")
         open_function = overlay.split("function open(payloadJson)", 1)[1].split(

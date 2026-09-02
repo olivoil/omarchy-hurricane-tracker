@@ -242,16 +242,17 @@ Item {
     if (width < 40 || height < 40 || !normalized) return false
     cancelOpeningFlight()
     cameraOffsetY = 0
-    openingArrivalPlace = normalized
     var focus = Model.watchPlaceFocus(
       normalized, minimumZoom, minimumZoom, maximumZoom)
     if (!focus) return false
+    openingArrivalPlace = normalized
     if (animate !== true) {
       centreLatitude = focus.centreLatitude
       centreLongitude = focus.centreLongitude
       zoom = focus.zoom
       userMoved = true
       clearHover()
+      openingArrivalPlace = null
       canvas.requestPaint()
       return true
     }
@@ -961,6 +962,7 @@ Item {
     }
     onFinished: {
       root.centreLongitude = Model.wrapLongitude(root.openingFlightTargetLongitude)
+      root.openingArrivalPlace = null
       canvas.requestPaint()
     }
   }

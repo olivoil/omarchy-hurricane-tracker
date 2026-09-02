@@ -1036,10 +1036,14 @@ Item {
 
   Timer {
     id: openingLocationTimeout
-    interval: 4000
+    interval: 6500
     repeat: false
     onTriggered: {
       if (!root.pendingLocationArrival) return
+      if (root.defaultLocationLoading) {
+        openingLocationTimeout.restart()
+        return
+      }
       var payload = root.pendingOpeningPayload || ({})
       root.cancelPendingLocationArrival()
       root.applyRequestedMapView(payload)

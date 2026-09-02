@@ -407,13 +407,10 @@ Item {
   }
 
   function applyMotionPreference(raw) {
-    try {
-      var parsed = JSON.parse(String(raw || ""))
-      if (parsed && typeof parsed.bool === "boolean") {
-        motionEnabled = parsed.bool
-        return true
-      }
-    } catch (error) {
+    var value = Model.motionPreferenceValue(raw)
+    if (typeof value === "boolean") {
+      motionEnabled = value
+      return true
     }
     motionEnabled = false
     return false

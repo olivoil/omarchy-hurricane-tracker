@@ -13,6 +13,19 @@ function wheelScrollDistance(pixelDeltaY, angleDeltaY, discreteStep) {
   return -angle / 120 * step
 }
 
+function motionPreferenceValue(raw) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(raw || ""))
+  } catch (error) {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object") return null
+  if (typeof parsed.bool === "boolean") return parsed.bool
+  if (parsed.int === 0 || parsed.int === 1) return parsed.int === 1
+  return null
+}
+
 function dragVelocity(previousVelocity, deltaPixels, elapsedMilliseconds) {
   var previous = Number(previousVelocity)
   if (!isFinite(previous)) previous = 0
